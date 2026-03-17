@@ -19,7 +19,7 @@ async function bootstrap(): Promise<void> {
   const processor = new JobProcessor(jobsStore, settingsStore, gemini, logger);
   const app = await buildApp({
     logger,
-    webOrigin: env.webOrigin,
+    webOrigins: env.webOrigins,
     settingsStore,
     jobsStore,
     processor,

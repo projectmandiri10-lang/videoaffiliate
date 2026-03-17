@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchJobDetail,
   fetchJobs,
-  openStyleOutputLocation,
-  retryStyle
+  retryStyle,
+  toAbsoluteOutputUrl
 } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 import type { JobRecord, StyleId } from "../types";
@@ -22,7 +22,6 @@ export function JobsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [copyInfo, setCopyInfo] = useState("");
-  const [openingKey, setOpeningKey] = useState("");
 
   const refreshJobs = async () => {
     try {
@@ -95,33 +94,26 @@ export function JobsPage() {
     }
   };
 
-  const openLocation = async (jobId: string, styleId: StyleId) => {
-    const key = `${jobId}:${styleId}`;
-    try {
-      setOpeningKey(key);
-      await openStyleOutputLocation(jobId, styleId);
-    } catch (openError) {
-      setError((openError as Error).message);
-    } finally {
-      setOpeningKey("");
-    }
-  };
-
-  const outputLabels = (style: JobRecord["styles"][number]): string[] => {
-    const labels: string[] = [];
+  const getOutputLinks = (
+    style: JobRecord["styles"][number]
+  ): Array<{ label: string; href: string }> => {
+    const links: Array<{ label: string; href: string }> = [];
     if (style.srtPath) {
-      labels.push("SRT");
+      links.push({ label: "SRT", href: toAbsoluteOutputUrl(style.srtPath) });
     }
     if (style.wavPath) {
-      labels.push("WAV");
+      links.push({ label: "WAV", href: toAbsoluteOutputUrl(style.wavPath) });
     }
     if (style.mp4Path) {
-      labels.push("MP4");
+      links.push({ label: "MP4", href: toAbsoluteOutputUrl(style.mp4Path) });
     }
     if (style.captionPath) {
-      labels.push("Caption TXT");
+      links.push({
+        label: "Caption TXT",
+        href: toAbsoluteOutputUrl(style.captionPath)
+      });
     }
-    return labels;
+    return links;
   };
 
   const composeCaptionForCopy = (
@@ -155,8 +147,8 @@ export function JobsPage() {
                 void refreshDetail(job.jobId);
               }}
             >
-              <div>{job.title}</div>
-              <div className="small">#{job.jobId}</div>
+              <div className="break-anywhere">{job.title}</div>
+              <div className="small break-anywhere">#{job.jobId}</div>
               <StatusBadge status={job.overallStatus} />
             </button>
           ))}
@@ -180,72 +172,85 @@ export function JobsPage() {
             <p>
               <strong>Affiliate Link:</strong>{" "}
               {selected.affiliateLink ? (
-                <span>{selected.affiliateLink}</span>
+                <span className="break-anywhere">{selected.affiliateLink}</span>
               ) : (
                 <span className="small">Tidak tersedia</span>
               )}
             </p>
-            <table>
-              <thead>
-                <tr>
-                  <th>Style</th>
-                  <th>Status</th>
-                  <th>Output</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selected.styles.map((style) => (
-                  <tr key={style.styleId}>
-                    <td>{STYLE_LABEL[style.styleId]}</td>
-                    <td>
-                      <StatusBadge status={style.status} />
-                      {style.errorMessage && <div className="err-inline">{style.errorMessage}</div>}
-                    </td>
-                    <td>
-                      <div className="small">
-                        {outputLabels(style).length
-                          ? `Tersedia: ${outputLabels(style).join(", ")}`
-                          : "Belum ada file output"}
-                      </div>
-                      <button
-                        onClick={() => void openLocation(selected.jobId, style.styleId)}
-                        disabled={openingKey === `${selected.jobId}:${style.styleId}`}
-                      >
-                        {openingKey === `${selected.jobId}:${style.styleId}`
-                          ? "Opening..."
-                          : "Open File Location"}
-                      </button>
-                      {(style.captionText || style.hashtags?.length) && (
-                        <div className="caption-box">
-                          {style.captionText && <p>{style.captionText}</p>}
-                          {style.hashtags?.length ? (
-                            <p className="small">{style.hashtags.join(" ")}</p>
-                          ) : null}
-                          {selected.affiliateLink && (
-                            <p className="small">{selected.affiliateLink}</p>
-                          )}
-                          <button
-                            onClick={() =>
-                              void copyToClipboard(
-                                composeCaptionForCopy(style, selected.affiliateLink)
-                              )
-                            }
-                          >
-                            Copy Caption
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {(style.status === "failed" || style.status === "interrupted") && (
-                        <button onClick={() => void onRetry(style.styleId)}>Retry</button>
-                      )}
-                    </td>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Style</th>
+                    <th>Status</th>
+                    <th>Output</th>
+                    <th>Aksi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {selected.styles.map((style) => {
+                    const outputLinks = getOutputLinks(style);
+                    return (
+                      <tr key={style.styleId}>
+                        <td>{STYLE_LABEL[style.styleId]}</td>
+                        <td>
+                          <StatusBadge status={style.status} />
+                          {style.errorMessage && (
+                            <div className="err-inline break-anywhere">{style.errorMessage}</div>
+                          )}
+                        </td>
+                        <td>
+                          <div className="small">
+                            {outputLinks.length
+                              ? `Tersedia: ${outputLinks.map((item) => item.label).join(", ")}`
+                              : "Belum ada file output"}
+                          </div>
+                          {outputLinks.length > 0 && (
+                            <div className="output-links">
+                              {outputLinks.map((output) => (
+                                <a
+                                  key={output.label}
+                                  href={output.href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {output.label}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {(style.captionText || style.hashtags?.length) && (
+                            <div className="caption-box">
+                              {style.captionText && <p className="break-anywhere">{style.captionText}</p>}
+                              {style.hashtags?.length ? (
+                                <p className="small break-anywhere">{style.hashtags.join(" ")}</p>
+                              ) : null}
+                              {selected.affiliateLink && (
+                                <p className="small break-anywhere">{selected.affiliateLink}</p>
+                              )}
+                              <button
+                                onClick={() =>
+                                  void copyToClipboard(
+                                    composeCaptionForCopy(style, selected.affiliateLink)
+                                  )
+                                }
+                              >
+                                Copy Caption
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {(style.status === "failed" || style.status === "interrupted") && (
+                            <button onClick={() => void onRetry(style.styleId)}>Retry</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
         {copyInfo && <p className="ok-text">{copyInfo}</p>}

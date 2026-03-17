@@ -1,7 +1,11 @@
 import cors from "@fastify/cors";
 import multipart, { type MultipartFile } from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
+import Fastify, {
+  type FastifyBaseLogger,
+  type FastifyInstance,
+  type FastifyReply
+} from "fastify";
 import { createWriteStream } from "node:fs";
 import { access, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -32,10 +36,12 @@ import { probeVideoDuration } from "./utils/video.js";
 import type { IJobProcessor } from "./services/job-processor.js";
 import { openPathInExplorer } from "./utils/open-location.js";
 import { writeWav24kMono } from "./utils/audio.js";
+import { normalizeApiError } from "./utils/api-error.js";
+import { pruneVoicePreviewFiles } from "./utils/voice-preview.js";
 
 interface BuildAppOptions {
   logger: FastifyBaseLogger;
-  webOrigin: string;
+  webOrigins: string[];
   settingsStore: SettingsStore;
   jobsStore: JobsStore;
   processor: IJobProcessor;
@@ -46,6 +52,8 @@ interface BuildAppOptions {
   };
   probeDuration?: (videoPath: string) => Promise<number>;
   openOutputLocation?: (folderPath: string) => Promise<void>;
+  writePreviewAudio?: typeof writeWav24kMono;
+  pruneVoicePreviews?: (previewDir: string) => Promise<void>;
 }
 
 function nowIso(): string {
@@ -67,6 +75,18 @@ function pickVideoExtension(part: MultipartFile): string {
   }
   const fromMime = mime.extension(part.mimetype || "");
   return fromMime ? `.${fromMime}` : ".mp4";
+}
+
+function sendNormalizedError(
+  reply: FastifyReply,
+  error: unknown,
+  message: string
+) {
+  const normalized = normalizeApiError(error);
+  return reply.code(normalized.statusCode).send({
+    message,
+    error: normalized.error
+  });
 }
 
 async function maybeRegisterWebStatic(app: FastifyInstance): Promise<void> {
@@ -97,9 +117,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const app = Fastify({ loggerInstance: options.logger });
   const durationProbe = options.probeDuration ?? probeVideoDuration;
   const openOutputLocation = options.openOutputLocation ?? openPathInExplorer;
+  const writePreviewAudio = options.writePreviewAudio ?? writeWav24kMono;
+  const pruneVoicePreviews =
+    options.pruneVoicePreviews ??
+    ((previewDir: string) =>
+      pruneVoicePreviewFiles(previewDir, {
+        logger: options.logger
+      }));
 
   await app.register(cors, {
-    origin: options.webOrigin,
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, options.webOrigins.includes(origin));
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
   });
@@ -115,23 +148,37 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   await maybeRegisterWebStatic(app);
 
+  app.setErrorHandler((error, request, reply) => {
+    request.log.error({ err: error }, "Unhandled API error.");
+    return sendNormalizedError(reply, error, "Terjadi kesalahan pada server.");
+  });
+
   app.get("/api/health", async () => ({
     status: "ok",
     now: nowIso()
   }));
 
-  app.get("/api/settings", async () => options.settingsStore.get());
+  app.get("/api/settings", async (_request, reply) => {
+    try {
+      return await options.settingsStore.get();
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memuat settings.");
+    }
+  });
 
   app.put("/api/settings", async (request, reply) => {
+    let parsed;
     try {
-      const parsed = parseSettings(request.body);
+      parsed = parseSettings(request.body);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Settings tidak valid.");
+    }
+
+    try {
       await options.settingsStore.set(parsed);
       return reply.send(parsed);
     } catch (error) {
-      return reply.code(400).send({
-        message: "Settings tidak valid.",
-        error: (error as { message?: string })?.message
-      });
+      return sendNormalizedError(reply, error, "Gagal menyimpan settings.");
     }
   });
 
@@ -149,14 +196,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
+    let payload;
     try {
-      const payload = parseTtsPreviewInput(request.body);
-      const voice = findTtsVoiceByName(payload.voiceName);
-      if (!voice) {
-        return reply.code(400).send({
-          message: `Voice ${payload.voiceName} tidak tersedia pada katalog Gemini.`
-        });
-      }
+      payload = parseTtsPreviewInput(request.body);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Input preview voice tidak valid.");
+    }
+
+    const voice = findTtsVoiceByName(payload.voiceName);
+    if (!voice) {
+      return reply.code(400).send({
+        message: `Voice ${payload.voiceName} tidak tersedia pada katalog Gemini.`
+      });
+    }
+
+    try {
       const settings = await options.settingsStore.get();
       const sampleText =
         payload.text ||
@@ -170,30 +224,39 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
       const previewDir = path.join(OUTPUTS_DIR, "_voice_previews");
       await mkdir(previewDir, { recursive: true });
+      await pruneVoicePreviews(previewDir).catch((error) => {
+        options.logger.warn({ err: error, previewDir }, "Gagal prune preview voice lama.");
+      });
       const filename = `${Date.now()}-${voice.voiceName}-${nanoid(5)}.wav`;
       const outputPath = path.join(previewDir, filename);
-      await writeWav24kMono(audio.data, audio.mimeType, outputPath, payload.speechRate);
+      await writePreviewAudio(audio.data, audio.mimeType, outputPath, payload.speechRate);
 
       return reply.send({
         voiceName: voice.voiceName,
         previewPath: `/outputs/_voice_previews/${filename}`
       });
     } catch (error) {
-      return reply.code(400).send({
-        message: "Gagal membuat preview voice.",
-        error: (error as { message?: string })?.message
-      });
+      return sendNormalizedError(reply, error, "Gagal membuat preview voice.");
     }
   });
 
-  app.get("/api/jobs", async () => {
-    const jobs = await options.jobsStore.list();
-    return jobs;
+  app.get("/api/jobs", async (_request, reply) => {
+    try {
+      const jobs = await options.jobsStore.list();
+      return jobs;
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memuat daftar job.");
+    }
   });
 
   app.get("/api/jobs/:jobId", async (request, reply) => {
     const params = request.params as { jobId: string };
-    const job = await options.jobsStore.getById(params.jobId);
+    let job;
+    try {
+      job = await options.jobsStore.getById(params.jobId);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memuat detail job.");
+    }
     if (!job) {
       return reply.code(404).send({ message: "Job tidak ditemukan." });
     }
@@ -298,78 +361,83 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     let videoMimeType = "video/mp4";
     let uploadDir = "";
     const jobId = nanoid(10);
+    let keepUploadDir = false;
 
-    for await (const part of parts) {
-      if (part.type === "file" && part.fieldname === "video") {
-        uploadDir = path.join(UPLOADS_DIR, jobId);
-        await mkdir(uploadDir, { recursive: true });
-        const extension = pickVideoExtension(part);
-        videoPath = path.join(uploadDir, `source${extension}`);
-        videoMimeType = part.mimetype || "video/mp4";
-        await pipeline(part.file, createWriteStream(videoPath));
-        continue;
+    const cleanupUploadDir = async () => {
+      if (!uploadDir) {
+        return;
       }
-      if (part.type === "field" && part.fieldname === "title") {
-        title = String(part.value || "").trim();
-      }
-      if (part.type === "field" && part.fieldname === "description") {
-        description = String(part.value || "").trim();
-      }
-      if (part.type === "field" && part.fieldname === "affiliateLink") {
-        affiliateLink = String(part.value || "").trim();
-      }
-      if (part.type === "field" && part.fieldname === "styleId") {
-        styleIdRaw = String(part.value || "").trim();
-      }
-      if (part.type === "field" && part.fieldname === "voiceName") {
-        voiceNameRaw = String(part.value || "").trim();
-      }
-      if (part.type === "field" && part.fieldname === "speechRate") {
-        speechRateRaw = String(part.value || "").trim();
-      }
-      if (part.type === "file") {
-        part.file.resume();
-      }
-    }
-
-    if (!videoPath) {
-      return reply.code(400).send({ message: "File video wajib diisi." });
-    }
-    if (!title || !description || !affiliateLink) {
-      if (uploadDir) {
-        await rm(uploadDir, { recursive: true, force: true });
-      }
-      return reply
-        .code(400)
-        .send({ message: "Field title, description, dan affiliateLink wajib diisi." });
-    }
-    if (!styleIdRaw) {
-      if (uploadDir) {
-        await rm(uploadDir, { recursive: true, force: true });
-      }
-      return reply.code(400).send({ message: "Field styleId wajib diisi." });
-    }
-
-    let selectedStyleId: StyleId;
-    try {
-      selectedStyleId = parseRetryStyleId({ styleId: styleIdRaw });
-    } catch (error) {
-      if (uploadDir) {
-        await rm(uploadDir, { recursive: true, force: true });
-      }
-      return reply.code(400).send({
-        message: "styleId tidak valid.",
-        error: (error as { message?: string })?.message
+      const currentUploadDir = uploadDir;
+      uploadDir = "";
+      await rm(currentUploadDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50
       });
-    }
+    };
 
     try {
+      for await (const part of parts) {
+        if (part.type === "file" && part.fieldname === "video") {
+          uploadDir = path.join(UPLOADS_DIR, jobId);
+          await mkdir(uploadDir, { recursive: true });
+          const extension = pickVideoExtension(part);
+          videoPath = path.join(uploadDir, `source${extension}`);
+          videoMimeType = part.mimetype || "video/mp4";
+          await pipeline(part.file, createWriteStream(videoPath));
+          continue;
+        }
+        if (part.type === "field" && part.fieldname === "title") {
+          title = String(part.value || "").trim();
+        }
+        if (part.type === "field" && part.fieldname === "description") {
+          description = String(part.value || "").trim();
+        }
+        if (part.type === "field" && part.fieldname === "affiliateLink") {
+          affiliateLink = String(part.value || "").trim();
+        }
+        if (part.type === "field" && part.fieldname === "styleId") {
+          styleIdRaw = String(part.value || "").trim();
+        }
+        if (part.type === "field" && part.fieldname === "voiceName") {
+          voiceNameRaw = String(part.value || "").trim();
+        }
+        if (part.type === "field" && part.fieldname === "speechRate") {
+          speechRateRaw = String(part.value || "").trim();
+        }
+        if (part.type === "file") {
+          part.file.resume();
+        }
+      }
+
+      if (!videoPath) {
+        return reply.code(400).send({ message: "File video wajib diisi." });
+      }
+      if (!title || !description || !affiliateLink) {
+        return reply
+          .code(400)
+          .send({ message: "Field title, description, dan affiliateLink wajib diisi." });
+      }
+      if (!styleIdRaw) {
+        return reply.code(400).send({ message: "Field styleId wajib diisi." });
+      }
+
+      let selectedStyleId: StyleId;
+      try {
+        selectedStyleId = parseRetryStyleId({ styleId: styleIdRaw });
+      } catch (error) {
+        return reply.code(400).send({
+          message: "styleId tidak valid.",
+          error: (error as { message?: string })?.message
+        });
+      }
+
       const settings = await options.settingsStore.get();
       const selectedStyle = settings.styles.find(
         (style) => style.styleId === selectedStyleId
       );
       if (!selectedStyle?.enabled) {
-        await rm(uploadDir, { recursive: true, force: true });
         return reply.code(400).send({
           message: `Style ${selectedStyleId} tidak aktif di settings.`
         });
@@ -379,7 +447,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       if (voiceNameRaw) {
         const voice = findTtsVoiceByName(voiceNameRaw);
         if (!voice) {
-          await rm(uploadDir, { recursive: true, force: true });
           return reply.code(400).send({
             message: `Voice ${voiceNameRaw} tidak tersedia pada katalog Gemini.`
           });
@@ -392,7 +459,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         try {
           selectedSpeechRate = parseSpeechRate(speechRateRaw);
         } catch (error) {
-          await rm(uploadDir, { recursive: true, force: true });
           return reply.code(400).send({
             message: "speechRate tidak valid (range 0.7 - 1.3).",
             error: (error as { message?: string })?.message
@@ -402,7 +468,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
       const durationSec = await durationProbe(videoPath);
       if (durationSec > settings.maxVideoSeconds) {
-        await rm(uploadDir, { recursive: true, force: true });
         return reply.code(400).send({
           message: `Durasi video ${durationSec.toFixed(2)}s melebihi batas ${settings.maxVideoSeconds}s.`
         });
@@ -425,6 +490,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         styles: createStyleRuns([selectedStyleId])
       };
       await options.jobsStore.create(job);
+      keepUploadDir = true;
       options.processor.enqueue(jobId, [selectedStyleId]);
 
       return reply.code(202).send({
@@ -432,11 +498,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         status: "queued"
       });
     } catch (error) {
-      await rm(uploadDir, { recursive: true, force: true });
-      return reply.code(400).send({
-        message: "Gagal memproses upload video.",
-        error: (error as { message?: string })?.message
-      });
+      if (!keepUploadDir) {
+        await cleanupUploadDir();
+      }
+      return sendNormalizedError(reply, error, "Gagal memproses upload video.");
+    } finally {
+      if (!keepUploadDir) {
+        await cleanupUploadDir();
+      }
     }
   });
 

@@ -1,11 +1,15 @@
 import FormData from "form-data";
 import pino from "pino";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir, utimes, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { SettingsStore } from "../src/stores/settings-store.js";
 import { JobsStore } from "../src/stores/jobs-store.js";
 import { DEFAULT_SETTINGS } from "../src/constants.js";
 import type { StyleId } from "../src/types.js";
+import { OUTPUTS_DIR, SETTINGS_FILE, UPLOADS_DIR } from "../src/utils/paths.js";
 import { resetTestStorage } from "./helpers.js";
 
 describe("api integration", () => {
@@ -14,6 +18,7 @@ describe("api integration", () => {
   const jobsStore = new JobsStore();
   const enqueueCalls: Array<{ jobId: string; styleIds?: StyleId[] }> = [];
   const openCalls: string[] = [];
+  const previewWrites: string[] = [];
   const processor = {
     enqueue(jobId: string, styleIds?: StyleId[]) {
       enqueueCalls.push({ jobId, styleIds });
@@ -21,21 +26,44 @@ describe("api integration", () => {
   };
 
   let app: Awaited<ReturnType<typeof buildApp>>;
+  let probeDuration: (videoPath: string) => Promise<number>;
+  let generateSpeech: (
+    input: {
+      model: string;
+      text: string;
+      voiceName: string;
+      speechRate: number;
+    }
+  ) => Promise<{ data: Buffer; mimeType: string }>;
 
   beforeEach(async () => {
     enqueueCalls.length = 0;
     openCalls.length = 0;
+    previewWrites.length = 0;
+    probeDuration = async () => 30;
+    generateSpeech = async () => ({
+      data: Buffer.from("preview-audio"),
+      mimeType: "audio/wav"
+    });
     await resetTestStorage();
     await settingsStore.set(DEFAULT_SETTINGS);
     app = await buildApp({
       logger,
-      webOrigin: "http://localhost:5173",
+      webOrigins: ["http://localhost:5173"],
       settingsStore,
       jobsStore,
       processor,
-      probeDuration: async () => 30,
+      probeDuration: async (videoPath) => probeDuration(videoPath),
       openOutputLocation: async (folderPath) => {
         openCalls.push(folderPath);
+      },
+      speechGenerator: {
+        generateSpeech: async (input) => generateSpeech(input)
+      },
+      writePreviewAudio: async (_data, _mimeType, outputPath) => {
+        previewWrites.push(outputPath);
+        await mkdir(path.dirname(outputPath), { recursive: true });
+        await writeFile(outputPath, "preview", "utf8");
       }
     });
     await app.ready();
@@ -121,6 +149,31 @@ describe("api integration", () => {
     expect(fetched.scriptModel).toBe("custom-script-model");
   });
 
+  it("rejects settings with unknown voice name", async () => {
+    const updated = {
+      ...DEFAULT_SETTINGS,
+      styles: DEFAULT_SETTINGS.styles.map((style) =>
+        style.styleId === "evergreen"
+          ? {
+              ...style,
+              voiceName: "UnknownVoice"
+            }
+          : style
+      )
+    };
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: updated
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: "Settings tidak valid."
+    });
+  });
+
   it("returns tts voices catalog", async () => {
     const response = await app.inject({
       method: "GET",
@@ -136,6 +189,65 @@ describe("api integration", () => {
     expect(payload.voices.length).toBeGreaterThan(0);
     expect(Array.isArray(payload.excitedPresets)).toBe(true);
     expect(payload.excitedPresets.length).toBeGreaterThan(0);
+  });
+
+  it("returns 500 and preserves file when settings json is corrupt", async () => {
+    await writeFile(SETTINGS_FILE, "{invalid-json", "utf8");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/settings"
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      message: "Gagal memuat settings."
+    });
+    expect(response.json().error).toContain("File JSON tidak valid");
+    expect(await readFile(SETTINGS_FILE, "utf8")).toBe("{invalid-json");
+  });
+
+  it("maps gemini rate limit preview failure to 429", async () => {
+    generateSpeech = async () => {
+      throw new Error('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}');
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/tts/preview",
+      payload: {
+        voiceName: "Aoede",
+        speechRate: 1
+      }
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toMatchObject({
+      message: "Gagal membuat preview voice."
+    });
+  });
+
+  it("prunes old voice previews when generating a new preview", async () => {
+    const previewDir = path.join(OUTPUTS_DIR, "_voice_previews");
+    const expiredPreview = path.join(previewDir, "expired.wav");
+    await mkdir(previewDir, { recursive: true });
+    await writeFile(expiredPreview, "old-preview", "utf8");
+    const oldDate = new Date(Date.now() - 26 * 60 * 60 * 1000);
+    await utimes(expiredPreview, oldDate, oldDate);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/tts/preview",
+      payload: {
+        voiceName: "Aoede",
+        speechRate: 1,
+        text: "Tes preview baru"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(existsSync(expiredPreview)).toBe(false);
+    expect(previewWrites.length).toBe(1);
   });
 
   it("retries failed style only", async () => {
@@ -181,6 +293,35 @@ describe("api integration", () => {
     expect(retryResponse.statusCode).toBe(200);
     expect(enqueueCalls.length).toBeGreaterThan(1);
     expect(enqueueCalls[enqueueCalls.length - 1]?.styleIds).toEqual(["evergreen"]);
+  });
+
+  it("cleans upload temp dir when runtime processing fails", async () => {
+    probeDuration = async () => {
+      throw new Error("ffprobe gagal membaca file");
+    };
+
+    const form = new FormData();
+    form.append("video", Buffer.from("fake-video-data"), {
+      filename: "clip.mp4",
+      contentType: "video/mp4"
+    });
+    form.append("title", "Judul Error Runtime");
+    form.append("description", "Deskripsi Error Runtime");
+    form.append("affiliateLink", "https://contoh-affiliate.test/runtime");
+    form.append("styleId", "evergreen");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      message: "Gagal memproses upload video."
+    });
+    expect(await readdir(UPLOADS_DIR)).toEqual([]);
   });
 
   it("opens output location", async () => {

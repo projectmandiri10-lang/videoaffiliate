@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { fetchSettings, updateSettings } from "../api";
-import type { AppSettings, StyleConfig } from "../types";
+import { fetchSettings, fetchTtsVoices, updateSettings } from "../api";
+import type { AppSettings, StyleConfig, TtsVoiceOption } from "../types";
 
 const STYLE_TITLE: Record<StyleConfig["styleId"], string> = {
   evergreen: "Evergreen",
@@ -11,14 +11,55 @@ const STYLE_TITLE: Record<StyleConfig["styleId"], string> = {
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [voiceOptions, setVoiceOptions] = useState<TtsVoiceOption[]>([]);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [voiceCatalogError, setVoiceCatalogError] = useState("");
 
   useEffect(() => {
-    fetchSettings()
-      .then(setSettings)
-      .catch((loadError) => setError((loadError as Error).message));
+    let mounted = true;
+
+    const load = async () => {
+      try {
+        const loadedSettings = await fetchSettings();
+        if (!mounted) {
+          return;
+        }
+        setSettings(loadedSettings);
+        setError("");
+      } catch (loadError) {
+        if (mounted) {
+          setError((loadError as Error).message);
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const voiceData = await fetchTtsVoices();
+        if (!mounted) {
+          return;
+        }
+        setVoiceOptions(Array.isArray(voiceData.voices) ? voiceData.voices : []);
+        setVoiceCatalogError("");
+      } catch (loadError) {
+        if (mounted) {
+          setVoiceCatalogError((loadError as Error).message);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const onStyleChange = <K extends keyof StyleConfig>(
@@ -54,7 +95,7 @@ export function SettingsPage() {
     }
   };
 
-  if (!settings) {
+  if (loading || !settings) {
     return (
       <section className="card">
         <h2>Settings</h2>
@@ -112,12 +153,29 @@ export function SettingsPage() {
               </label>
               <label>
                 Voice Name
-                <input
+                <select
                   value={style.voiceName}
+                  disabled={!voiceOptions.length}
                   onChange={(event) =>
                     onStyleChange(style.styleId, "voiceName", event.target.value)
                   }
-                />
+                >
+                  {!voiceOptions.some((voice) => voice.voiceName === style.voiceName) && (
+                    <option value={style.voiceName}>
+                      {style.voiceName} (tidak ada di katalog)
+                    </option>
+                  )}
+                  {voiceOptions.map((voice) => (
+                    <option key={voice.voiceName} value={voice.voiceName}>
+                      {voice.label} - {voice.tone} ({voice.gender})
+                    </option>
+                  ))}
+                </select>
+                {voiceCatalogError && (
+                  <span className="small err-inline">
+                    Gagal memuat katalog voice: {voiceCatalogError}
+                  </span>
+                )}
               </label>
               <label>
                 Speech Rate

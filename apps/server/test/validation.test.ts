@@ -18,6 +18,22 @@ describe("validation", () => {
     ).toThrow();
   });
 
+  it("rejects unknown voice name in settings", () => {
+    expect(() =>
+      parseSettings({
+        ...DEFAULT_SETTINGS,
+        styles: DEFAULT_SETTINGS.styles.map((style) =>
+          style.styleId === "evergreen"
+            ? {
+                ...style,
+                voiceName: "UnknownVoice"
+              }
+            : style
+        )
+      })
+    ).toThrow();
+  });
+
   it("validates retry style id", () => {
     expect(parseRetryStyleId({ styleId: "hard_selling" })).toBe("hard_selling");
     expect(() => parseRetryStyleId({ styleId: "unknown" })).toThrow();

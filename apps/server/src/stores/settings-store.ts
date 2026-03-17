@@ -2,18 +2,22 @@ import { DEFAULT_SETTINGS } from "../constants.js";
 import { SETTINGS_FILE } from "../utils/paths.js";
 import { JsonFile } from "../utils/json-file.js";
 import type { AppSettings } from "../types.js";
+import { parseSettings } from "../validation.js";
 
 export class SettingsStore {
   private readonly file = new JsonFile<AppSettings>(SETTINGS_FILE, DEFAULT_SETTINGS);
 
   public async get(): Promise<AppSettings> {
     const settings = await this.file.get();
-    if (!settings.styles?.length) {
-      await this.file.set(DEFAULT_SETTINGS);
-      return DEFAULT_SETTINGS;
+    try {
+      return parseSettings(settings);
+    } catch (error) {
+      throw new Error(
+        `Settings file tidak valid (${SETTINGS_FILE}): ${
+          (error as { message?: string })?.message || "format settings tidak sesuai"
+        }`
+      );
     }
-
-    return settings;
   }
 
   public async set(next: AppSettings): Promise<AppSettings> {

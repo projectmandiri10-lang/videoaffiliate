@@ -8,14 +8,17 @@ dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 export interface AppEnv {
   geminiApiKey: string;
   port: number;
-  webOrigin: string;
+  webOrigins: string[];
 }
 
 export function loadEnv(): AppEnv {
   const geminiApiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
   const portRaw = process.env.PORT?.trim();
   const port = portRaw ? Number(portRaw) : DEFAULT_PORT;
-  const webOrigin = process.env.WEB_ORIGIN?.trim() || "http://localhost:5173";
+  const webOrigins = (process.env.WEB_ORIGIN?.trim() || "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 
   if (!geminiApiKey) {
     throw new Error(
@@ -27,5 +30,11 @@ export function loadEnv(): AppEnv {
     throw new Error(`PORT tidak valid: ${portRaw}`);
   }
 
-  return { geminiApiKey, port, webOrigin };
+  if (!webOrigins.length) {
+    throw new Error(
+      "WEB_ORIGIN tidak valid. Isi minimal satu origin, contoh: http://localhost:5173"
+    );
+  }
+
+  return { geminiApiKey, port, webOrigins };
 }

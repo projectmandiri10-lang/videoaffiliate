@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 export class JsonFile<T> {
   private chain: Promise<unknown> = Promise.resolve();
@@ -11,14 +12,45 @@ export class JsonFile<T> {
   private async readRaw(): Promise<T> {
     try {
       const raw = await readFile(this.filePath, "utf8");
-      return JSON.parse(raw) as T;
-    } catch {
-      return this.fallback;
+      try {
+        return JSON.parse(raw) as T;
+      } catch (error) {
+        throw new Error(
+          `File JSON tidak valid di ${this.filePath}: ${
+            (error as { message?: string })?.message || "format JSON rusak"
+          }`
+        );
+      }
+    } catch (error) {
+      const readError = error as NodeJS.ErrnoException;
+      if (readError.code === "ENOENT") {
+        return this.fallback;
+      }
+      throw new Error(
+        `Gagal membaca file ${this.filePath}: ${
+          readError.message || "error filesystem tidak diketahui"
+        }`
+      );
     }
   }
 
   private async writeRaw(data: T): Promise<void> {
-    await writeFile(this.filePath, JSON.stringify(data, null, 2), "utf8");
+    const directory = path.dirname(this.filePath);
+    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+
+    await mkdir(directory, { recursive: true });
+    try {
+      await writeFile(tempPath, JSON.stringify(data, null, 2), "utf8");
+      await rename(tempPath, this.filePath);
+    } catch (error) {
+      throw new Error(
+        `Gagal menulis file ${this.filePath}: ${
+          (error as { message?: string })?.message || "error filesystem tidak diketahui"
+        }`
+      );
+    } finally {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+    }
   }
 
   public async get(): Promise<T> {

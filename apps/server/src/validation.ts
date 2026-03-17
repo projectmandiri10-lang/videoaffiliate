@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { STYLE_ORDER } from "./constants.js";
+import { isKnownTtsVoiceName, STYLE_ORDER } from "./constants.js";
 import type { AppSettings, StyleId } from "./types.js";
 
 const styleIdSchema = z.enum(STYLE_ORDER);
@@ -8,7 +8,11 @@ const styleSchema = z.object({
   styleId: styleIdSchema,
   enabled: z.boolean(),
   promptTemplate: z.string().trim().min(1),
-  voiceName: z.string().trim().min(1),
+  voiceName: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((value) => isKnownTtsVoiceName(value), "Voice tidak tersedia pada katalog Gemini."),
   speechRate: z.number().min(0.7).max(1.3)
 });
 
@@ -36,7 +40,11 @@ export const retrySchema = z.object({
 const speechRateSchema = z.number().min(0.7).max(1.3);
 
 const ttsPreviewSchema = z.object({
-  voiceName: z.string().trim().min(1),
+  voiceName: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((value) => isKnownTtsVoiceName(value), "Voice tidak tersedia pada katalog Gemini."),
   speechRate: speechRateSchema.optional(),
   text: z.string().trim().min(1).max(220).optional()
 });

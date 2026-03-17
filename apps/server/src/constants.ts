@@ -169,3 +169,7 @@ export const GEMINI_EXCITED_PRESETS: ExcitedVoicePreset[] = [
 export function findTtsVoiceByName(voiceName: string): TtsVoiceOption | undefined {
   return GEMINI_TTS_VOICES.find((voice) => voice.voiceName === voiceName);
 }
+
+export function isKnownTtsVoiceName(voiceName: string): boolean {
+  return Boolean(findTtsVoiceByName(voiceName));
+}

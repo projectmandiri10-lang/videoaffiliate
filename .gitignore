@@ -11,3 +11,5 @@ logs/*
 !logs/.gitkeep
 data/jobs.json
 data/edit-sessions.json
+apps/server/.test-runtime/
+edits/
