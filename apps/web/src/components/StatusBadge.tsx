@@ -1,6 +1,6 @@
-import type { JobOverallStatus, StyleStatus } from "../types";
+import type { JobOverallStatus, PlatformStatus } from "../types";
 
-const palette: Record<JobOverallStatus | StyleStatus, string> = {
+const palette: Record<JobOverallStatus | PlatformStatus, string> = {
   queued: "status status-queued",
   running: "status status-running",
   success: "status status-success",
@@ -11,6 +11,6 @@ const palette: Record<JobOverallStatus | StyleStatus, string> = {
   done: "status status-success"
 };
 
-export function StatusBadge({ status }: { status: JobOverallStatus | StyleStatus }) {
+export function StatusBadge({ status }: { status: JobOverallStatus | PlatformStatus }) {
   return <span className={palette[status] || "status"}>{status}</span>;
 }

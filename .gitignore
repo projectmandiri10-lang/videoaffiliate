@@ -12,4 +12,5 @@ logs/*
 data/jobs.json
 data/edit-sessions.json
 apps/server/.test-runtime/
+apps/server/.vitest-storage/
 edits/

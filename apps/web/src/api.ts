@@ -2,7 +2,7 @@ import type {
   AppSettings,
   ExcitedVoicePreset,
   JobRecord,
-  StyleId,
+  PlatformId,
   TtsVoiceOption
 } from "./types";
 
@@ -60,21 +60,15 @@ export async function updateSettings(settings: AppSettings): Promise<AppSettings
 
 export async function createJob(input: {
   video: File;
-  voiceName: string;
-  speechRate: number;
   title: string;
   description: string;
   affiliateLink: string;
-  styleId: StyleId;
 }): Promise<{ jobId: string; status: string }> {
   const form = new FormData();
   form.append("video", input.video);
-  form.append("voiceName", input.voiceName);
-  form.append("speechRate", String(input.speechRate));
   form.append("title", input.title);
   form.append("description", input.description);
   form.append("affiliateLink", input.affiliateLink);
-  form.append("styleId", input.styleId);
   const res = await fetch(`${API_BASE}/api/jobs`, {
     method: "POST",
     body: form
@@ -92,27 +86,52 @@ export async function fetchJobDetail(jobId: string): Promise<JobRecord> {
   return parseResponse<JobRecord>(res);
 }
 
-export async function retryStyle(jobId: string, styleId: StyleId): Promise<void> {
+export async function updateJob(
+  jobId: string,
+  input: {
+    title: string;
+    description: string;
+    affiliateLink: string;
+  }
+): Promise<JobRecord> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  return parseResponse<JobRecord>(res);
+}
+
+export async function deleteJob(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+    method: "DELETE"
+  });
+  await parseResponse<{ ok: boolean }>(res);
+}
+
+export async function retryPlatform(jobId: string, platformId: PlatformId): Promise<void> {
   const res = await fetch(`${API_BASE}/api/jobs/${jobId}/retry`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ styleId })
+    body: JSON.stringify({ platformId })
   });
   await parseResponse<{ ok: boolean }>(res);
 }
 
-export async function openStyleOutputLocation(
+export async function openPlatformOutputLocation(
   jobId: string,
-  styleId: StyleId
+  platformId: PlatformId
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/jobs/${jobId}/open-location`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ styleId })
+    body: JSON.stringify({ platformId })
   });
   await parseResponse<{ ok: boolean }>(res);
 }

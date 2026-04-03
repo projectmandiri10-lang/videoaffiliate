@@ -3,21 +3,19 @@ import { DEFAULT_SETTINGS } from "../src/constants.js";
 import { buildScriptPrompt } from "../src/services/prompt-builder.js";
 
 describe("prompt builder", () => {
-  it("enforces strong opening hook instruction", () => {
-    const style = DEFAULT_SETTINGS.styles[0];
-    if (!style) {
-      throw new Error("Style default tidak ditemukan.");
-    }
-
+  it("injects platform-specific prompt instructions", () => {
     const prompt = buildScriptPrompt({
       settings: DEFAULT_SETTINGS,
-      style,
+      platformId: "tiktok",
       title: "Serum pencerah wajah",
       description: "Serum dengan niacinamide untuk bantu mencerahkan kulit kusam.",
       videoDurationSec: 20
     });
 
     expect(prompt).toContain("Kalimat pembuka wajib menjadi hook kuat");
-    expect(prompt).toContain("Instruksi style:");
+    expect(prompt).toContain("Platform target: TikTok");
+    expect(prompt).toContain("Jenis hook pembuka: curiosity");
+    expect(prompt).toContain("Karakter delivery voice: soft");
+    expect(prompt).toContain("CTA wajib mengarahkan penonton untuk cek keranjang produk.");
   });
 });

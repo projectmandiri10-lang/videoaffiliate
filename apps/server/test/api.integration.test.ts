@@ -5,23 +5,44 @@ import { mkdir, readFile, readdir, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { SettingsStore } from "../src/stores/settings-store.js";
+import { DEFAULT_SETTINGS, PLATFORM_ORDER } from "../src/constants.js";
 import { JobsStore } from "../src/stores/jobs-store.js";
-import { DEFAULT_SETTINGS } from "../src/constants.js";
-import type { StyleId } from "../src/types.js";
+import { SettingsStore } from "../src/stores/settings-store.js";
+import type { PlatformId } from "../src/types.js";
 import { OUTPUTS_DIR, SETTINGS_FILE, UPLOADS_DIR } from "../src/utils/paths.js";
 import { resetTestStorage } from "./helpers.js";
+
+function buildCreateForm(overrides?: {
+  title?: string;
+  description?: string;
+  affiliateLink?: string;
+}) {
+  const form = new FormData();
+  form.append("video", Buffer.from("fake-video-data"), {
+    filename: "clip.mp4",
+    contentType: "video/mp4"
+  });
+  form.append("title", overrides?.title ?? "Judul Tes");
+  form.append("description", overrides?.description ?? "Deskripsi Tes");
+  if (overrides?.affiliateLink !== null) {
+    form.append(
+      "affiliateLink",
+      overrides?.affiliateLink ?? "https://contoh-affiliate.test/abc"
+    );
+  }
+  return form;
+}
 
 describe("api integration", () => {
   const logger = pino({ level: "silent" });
   const settingsStore = new SettingsStore();
   const jobsStore = new JobsStore();
-  const enqueueCalls: Array<{ jobId: string; styleIds?: StyleId[] }> = [];
+  const enqueueCalls: Array<{ jobId: string; platformIds?: PlatformId[] }> = [];
   const openCalls: string[] = [];
   const previewWrites: string[] = [];
   const processor = {
-    enqueue(jobId: string, styleIds?: StyleId[]) {
-      enqueueCalls.push({ jobId, styleIds });
+    enqueue(jobId: string, platformIds?: PlatformId[]) {
+      enqueueCalls.push({ jobId, platformIds });
     }
   };
 
@@ -75,18 +96,8 @@ describe("api integration", () => {
     }
   });
 
-  it("creates job from multipart upload", async () => {
-    const form = new FormData();
-    form.append("video", Buffer.from("fake-video-data"), {
-      filename: "clip.mp4",
-      contentType: "video/mp4"
-    });
-    form.append("voiceName", "Aoede");
-    form.append("speechRate", "1.05");
-    form.append("title", "Judul Tes");
-    form.append("description", "Deskripsi Tes");
-    form.append("affiliateLink", "https://contoh-affiliate.test/abc");
-    form.append("styleId", "evergreen");
+  it("creates a job from multipart upload for all platforms", async () => {
+    const form = buildCreateForm();
 
     const response = await app.inject({
       method: "POST",
@@ -100,23 +111,14 @@ describe("api integration", () => {
     expect(payload.status).toBe("queued");
     expect(enqueueCalls.length).toBe(1);
     expect(enqueueCalls[0]?.jobId).toBe(payload.jobId);
-    expect(enqueueCalls[0]?.styleIds).toEqual(["evergreen"]);
+    expect(enqueueCalls[0]?.platformIds).toEqual(PLATFORM_ORDER);
     const saved = await jobsStore.getById(payload.jobId);
     expect(saved?.affiliateLink).toBe("https://contoh-affiliate.test/abc");
-    expect(saved?.voiceName).toBe("Aoede");
-    expect(saved?.speechRate).toBeCloseTo(1.05, 6);
-    expect(saved?.styles.map((style) => style.styleId)).toEqual(["evergreen"]);
+    expect(saved?.platforms.map((platform) => platform.platformId)).toEqual(PLATFORM_ORDER);
   });
 
-  it("rejects create job if styleId is missing", async () => {
-    const form = new FormData();
-    form.append("video", Buffer.from("fake-video-data"), {
-      filename: "clip.mp4",
-      contentType: "video/mp4"
-    });
-    form.append("title", "Judul Tanpa Style");
-    form.append("description", "Deskripsi Tanpa Style");
-    form.append("affiliateLink", "https://contoh-affiliate.test/no-style");
+  it("rejects create job if affiliateLink is missing", async () => {
+    const form = buildCreateForm({ affiliateLink: null as unknown as string });
 
     const response = await app.inject({
       method: "POST",
@@ -152,13 +154,13 @@ describe("api integration", () => {
   it("rejects settings with unknown voice name", async () => {
     const updated = {
       ...DEFAULT_SETTINGS,
-      styles: DEFAULT_SETTINGS.styles.map((style) =>
-        style.styleId === "evergreen"
+      platforms: DEFAULT_SETTINGS.platforms.map((platform) =>
+        platform.platformId === "tiktok"
           ? {
-              ...style,
+              ...platform,
               voiceName: "UnknownVoice"
             }
-          : style
+          : platform
       )
     };
 
@@ -250,16 +252,12 @@ describe("api integration", () => {
     expect(previewWrites.length).toBe(1);
   });
 
-  it("retries failed style only", async () => {
-    const form = new FormData();
-    form.append("video", Buffer.from("fake-video-data"), {
-      filename: "clip.mp4",
-      contentType: "video/mp4"
+  it("retries failed platform only", async () => {
+    const form = buildCreateForm({
+      title: "Judul Retry",
+      description: "Deskripsi Retry",
+      affiliateLink: "https://contoh-affiliate.test/retry"
     });
-    form.append("title", "Judul Retry");
-    form.append("description", "Deskripsi Retry");
-    form.append("affiliateLink", "https://contoh-affiliate.test/retry");
-    form.append("styleId", "evergreen");
 
     const createResponse = await app.inject({
       method: "POST",
@@ -270,15 +268,16 @@ describe("api integration", () => {
     const payload = createResponse.json() as { jobId: string };
     await jobsStore.update(payload.jobId, (job) => ({
       ...job,
-      styles: job.styles.map((style, idx) =>
-        idx === 0
+      overallStatus: "failed",
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
           ? {
-              ...style,
+              ...platform,
               status: "failed",
               errorMessage: "mock fail",
               updatedAt: new Date().toISOString()
             }
-          : style
+          : platform
       )
     }));
 
@@ -286,13 +285,150 @@ describe("api integration", () => {
       method: "POST",
       url: `/api/jobs/${payload.jobId}/retry`,
       payload: {
-        styleId: "evergreen"
+        platformId: "tiktok"
       }
     });
 
     expect(retryResponse.statusCode).toBe(200);
     expect(enqueueCalls.length).toBeGreaterThan(1);
-    expect(enqueueCalls[enqueueCalls.length - 1]?.styleIds).toEqual(["evergreen"]);
+    expect(enqueueCalls[enqueueCalls.length - 1]?.platformIds).toEqual(["tiktok"]);
+  });
+
+  it("updates editable job metadata", async () => {
+    const form = buildCreateForm({
+      title: "Judul Awal",
+      description: "Deskripsi Awal",
+      affiliateLink: "https://contoh-affiliate.test/awal"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+
+    const updateResponse = await app.inject({
+      method: "PUT",
+      url: `/api/jobs/${payload.jobId}`,
+      payload: {
+        title: "Judul Baru",
+        description: "Deskripsi Baru",
+        affiliateLink: "https://contoh-affiliate.test/baru"
+      }
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    const updated = updateResponse.json() as {
+      title: string;
+      description: string;
+      affiliateLink: string;
+    };
+    expect(updated.title).toBe("Judul Baru");
+    expect(updated.description).toBe("Deskripsi Baru");
+    expect(updated.affiliateLink).toBe("https://contoh-affiliate.test/baru");
+  });
+
+  it("rejects update for completed job", async () => {
+    const form = buildCreateForm({
+      title: "Judul Selesai",
+      description: "Deskripsi Selesai",
+      affiliateLink: "https://contoh-affiliate.test/selesai"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "success"
+    }));
+
+    const updateResponse = await app.inject({
+      method: "PUT",
+      url: `/api/jobs/${payload.jobId}`,
+      payload: {
+        title: "Judul Gagal Edit",
+        description: "Deskripsi Gagal Edit",
+        affiliateLink: "https://contoh-affiliate.test/gagal-edit"
+      }
+    });
+
+    expect(updateResponse.statusCode).toBe(409);
+  });
+
+  it("deletes non-running job and cleans artifacts in platform folders", async () => {
+    const form = buildCreateForm({
+      title: "Judul Hapus",
+      description: "Deskripsi Hapus",
+      affiliateLink: "https://contoh-affiliate.test/hapus"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    const outputDir = path.join(OUTPUTS_DIR, "tiktok");
+    const mp4Path = path.join(outputDir, "judul-hapus.mp4");
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(mp4Path, "dummy-output", "utf8");
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
+          ? {
+              ...platform,
+              mp4Path: "/outputs/tiktok/judul-hapus.mp4",
+              artifactPaths: ["/outputs/tiktok/judul-hapus.mp4"]
+            }
+          : platform
+      )
+    }));
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/jobs/${payload.jobId}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(await jobsStore.getById(payload.jobId)).toBeUndefined();
+    expect(existsSync(path.join(UPLOADS_DIR, payload.jobId))).toBe(false);
+    expect(existsSync(mp4Path)).toBe(false);
+  });
+
+  it("rejects delete for running job", async () => {
+    const form = buildCreateForm({
+      title: "Judul Running",
+      description: "Deskripsi Running",
+      affiliateLink: "https://contoh-affiliate.test/running"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "running"
+    }));
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/jobs/${payload.jobId}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(409);
   });
 
   it("cleans upload temp dir when runtime processing fails", async () => {
@@ -300,15 +436,11 @@ describe("api integration", () => {
       throw new Error("ffprobe gagal membaca file");
     };
 
-    const form = new FormData();
-    form.append("video", Buffer.from("fake-video-data"), {
-      filename: "clip.mp4",
-      contentType: "video/mp4"
+    const form = buildCreateForm({
+      title: "Judul Error Runtime",
+      description: "Deskripsi Error Runtime",
+      affiliateLink: "https://contoh-affiliate.test/runtime"
     });
-    form.append("title", "Judul Error Runtime");
-    form.append("description", "Deskripsi Error Runtime");
-    form.append("affiliateLink", "https://contoh-affiliate.test/runtime");
-    form.append("styleId", "evergreen");
 
     const response = await app.inject({
       method: "POST",
@@ -324,16 +456,12 @@ describe("api integration", () => {
     expect(await readdir(UPLOADS_DIR)).toEqual([]);
   });
 
-  it("opens output location", async () => {
-    const form = new FormData();
-    form.append("video", Buffer.from("fake-video-data"), {
-      filename: "clip.mp4",
-      contentType: "video/mp4"
+  it("opens platform output location", async () => {
+    const form = buildCreateForm({
+      title: "Judul Lokasi",
+      description: "Deskripsi Lokasi",
+      affiliateLink: "https://contoh-affiliate.test/lokasi"
     });
-    form.append("title", "Judul Lokasi");
-    form.append("description", "Deskripsi Lokasi");
-    form.append("affiliateLink", "https://contoh-affiliate.test/lokasi");
-    form.append("styleId", "evergreen");
 
     const createResponse = await app.inject({
       method: "POST",
@@ -347,12 +475,12 @@ describe("api integration", () => {
       method: "POST",
       url: `/api/jobs/${payload.jobId}/open-location`,
       payload: {
-        styleId: "evergreen"
+        platformId: "tiktok"
       }
     });
 
     expect(openResponse.statusCode).toBe(200);
     expect(openCalls.length).toBe(1);
-    expect(openCalls[0]).toContain(payload.jobId);
+    expect(openCalls[0]).toContain("tiktok");
   });
 });

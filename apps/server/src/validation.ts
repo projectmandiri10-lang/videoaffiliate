@@ -1,19 +1,20 @@
 import { z } from "zod";
-import { isKnownTtsVoiceName, STYLE_ORDER } from "./constants.js";
-import type { AppSettings, StyleId } from "./types.js";
+import { isKnownTtsVoiceName, PLATFORM_ORDER } from "./constants.js";
+import type { AppSettings, PlatformId } from "./types.js";
 
-const styleIdSchema = z.enum(STYLE_ORDER);
+const platformIdSchema = z.enum(PLATFORM_ORDER);
+const nonEmptyTextSchema = z.string().trim().min(1);
+const speechRateSchema = z.number().min(0.7).max(1.3);
 
-const styleSchema = z.object({
-  styleId: styleIdSchema,
+const platformSchema = z.object({
+  platformId: platformIdSchema,
   enabled: z.boolean(),
-  promptTemplate: z.string().trim().min(1),
   voiceName: z
     .string()
     .trim()
     .min(1)
     .refine((value) => isKnownTtsVoiceName(value), "Voice tidak tersedia pada katalog Gemini."),
-  speechRate: z.number().min(0.7).max(1.3)
+  speechRate: speechRateSchema
 });
 
 export const settingsSchema = z.object({
@@ -24,20 +25,24 @@ export const settingsSchema = z.object({
   safetyMode: z.literal("safe_marketing"),
   ctaPosition: z.literal("end"),
   concurrency: z.literal(1),
-  styles: z
-    .array(styleSchema)
-    .length(STYLE_ORDER.length)
-    .refine((styles) => {
-      const ids = styles.map((style) => style.styleId);
-      return STYLE_ORDER.every((id) => ids.includes(id));
-    }, "Semua style harus ada.")
+  platforms: z
+    .array(platformSchema)
+    .length(PLATFORM_ORDER.length)
+    .refine((platforms) => {
+      const ids = platforms.map((platform) => platform.platformId);
+      return PLATFORM_ORDER.every((id) => ids.includes(id));
+    }, "Semua platform harus ada.")
 });
 
 export const retrySchema = z.object({
-  styleId: styleIdSchema
+  platformId: platformIdSchema
 });
 
-const speechRateSchema = z.number().min(0.7).max(1.3);
+const jobUpdateSchema = z.object({
+  title: nonEmptyTextSchema,
+  description: nonEmptyTextSchema,
+  affiliateLink: nonEmptyTextSchema
+});
 
 const ttsPreviewSchema = z.object({
   voiceName: z
@@ -51,18 +56,26 @@ const ttsPreviewSchema = z.object({
 
 export function parseSettings(input: unknown): AppSettings {
   const result = settingsSchema.parse(input);
-  const sorted = [...result.styles].sort(
-    (a, b) => STYLE_ORDER.indexOf(a.styleId) - STYLE_ORDER.indexOf(b.styleId)
+  const sorted = [...result.platforms].sort(
+    (a, b) => PLATFORM_ORDER.indexOf(a.platformId) - PLATFORM_ORDER.indexOf(b.platformId)
   );
   return {
     ...result,
-    styles: sorted
+    platforms: sorted
   };
 }
 
-export function parseRetryStyleId(input: unknown): StyleId {
+export function parseRetryPlatformId(input: unknown): PlatformId {
   const parsed = retrySchema.parse(input);
-  return parsed.styleId;
+  return parsed.platformId;
+}
+
+export function parseJobUpdateInput(input: unknown): {
+  title: string;
+  description: string;
+  affiliateLink: string;
+} {
+  return jobUpdateSchema.parse(input);
 }
 
 export function parseSpeechRate(input: unknown): number {

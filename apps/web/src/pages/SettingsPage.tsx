@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { fetchSettings, fetchTtsVoices, updateSettings } from "../api";
-import type { AppSettings, StyleConfig, TtsVoiceOption } from "../types";
+import type { AppSettings, PlatformSettings, TtsVoiceOption } from "../types";
 
-const STYLE_TITLE: Record<StyleConfig["styleId"], string> = {
-  evergreen: "Evergreen",
-  soft_selling: "Soft Selling",
-  hard_selling: "Hard Selling",
-  problem_solution: "Edukasi Problem-Solution"
+const PLATFORM_TITLE: Record<PlatformSettings["platformId"], string> = {
+  tiktok: "TikTok",
+  youtube: "YouTube Shorts",
+  facebook: "Facebook",
+  shopee: "Shopee"
 };
 
 export function SettingsPage() {
@@ -62,18 +62,18 @@ export function SettingsPage() {
     };
   }, []);
 
-  const onStyleChange = <K extends keyof StyleConfig>(
-    styleId: StyleConfig["styleId"],
+  const onPlatformChange = <K extends keyof PlatformSettings>(
+    platformId: PlatformSettings["platformId"],
     key: K,
-    value: StyleConfig[K]
+    value: PlatformSettings[K]
   ) => {
     if (!settings) {
       return;
     }
-    const styles = settings.styles.map((style) =>
-      style.styleId === styleId ? { ...style, [key]: value } : style
+    const platforms = settings.platforms.map((platform) =>
+      platform.platformId === platformId ? { ...platform, [key]: value } : platform
     );
-    setSettings({ ...settings, styles });
+    setSettings({ ...settings, platforms });
   };
 
   const onSave = async (event: FormEvent) => {
@@ -108,6 +108,10 @@ export function SettingsPage() {
   return (
     <section className="card">
       <h2>Settings</h2>
+      <p className="section-note">
+        Tone, hook, dan subtitle style dikunci oleh sistem. Halaman ini mengatur voice dan speech
+        rate per platform.
+      </p>
       <form className="grid-form" onSubmit={onSave}>
         <label>
           Script Model
@@ -138,15 +142,15 @@ export function SettingsPage() {
           />
         </label>
         <div className="style-grid">
-          {settings.styles.map((style) => (
-            <article className="style-card" key={style.styleId}>
-              <h3>{STYLE_TITLE[style.styleId]}</h3>
+          {settings.platforms.map((platform) => (
+            <article className="style-card" key={platform.platformId}>
+              <h3>{PLATFORM_TITLE[platform.platformId]}</h3>
               <label className="toggle">
                 <input
                   type="checkbox"
-                  checked={style.enabled}
+                  checked={platform.enabled}
                   onChange={(event) =>
-                    onStyleChange(style.styleId, "enabled", event.target.checked)
+                    onPlatformChange(platform.platformId, "enabled", event.target.checked)
                   }
                 />
                 Aktif
@@ -154,15 +158,15 @@ export function SettingsPage() {
               <label>
                 Voice Name
                 <select
-                  value={style.voiceName}
+                  value={platform.voiceName}
                   disabled={!voiceOptions.length}
                   onChange={(event) =>
-                    onStyleChange(style.styleId, "voiceName", event.target.value)
+                    onPlatformChange(platform.platformId, "voiceName", event.target.value)
                   }
                 >
-                  {!voiceOptions.some((voice) => voice.voiceName === style.voiceName) && (
-                    <option value={style.voiceName}>
-                      {style.voiceName} (tidak ada di katalog)
+                  {!voiceOptions.some((voice) => voice.voiceName === platform.voiceName) && (
+                    <option value={platform.voiceName}>
+                      {platform.voiceName} (tidak ada di katalog)
                     </option>
                   )}
                   {voiceOptions.map((voice) => (
@@ -184,19 +188,13 @@ export function SettingsPage() {
                   step="0.05"
                   min={0.7}
                   max={1.3}
-                  value={style.speechRate}
+                  value={platform.speechRate}
                   onChange={(event) =>
-                    onStyleChange(style.styleId, "speechRate", Number(event.target.value))
-                  }
-                />
-              </label>
-              <label>
-                Prompt Template
-                <textarea
-                  rows={6}
-                  value={style.promptTemplate}
-                  onChange={(event) =>
-                    onStyleChange(style.styleId, "promptTemplate", event.target.value)
+                    onPlatformChange(
+                      platform.platformId,
+                      "speechRate",
+                      Number(event.target.value)
+                    )
                   }
                 />
               </label>

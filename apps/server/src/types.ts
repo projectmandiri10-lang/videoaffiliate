@@ -1,12 +1,10 @@
-export type StyleId =
-  | "evergreen"
-  | "soft_selling"
-  | "hard_selling"
-  | "problem_solution";
+export type PlatformId = "tiktok" | "youtube" | "facebook" | "shopee";
+
+export type SubtitleStyle = "short_punchy" | "clear" | "narrative" | "sales";
 
 export type VoiceGender = "female" | "male" | "neutral";
 
-export type StyleStatus = "pending" | "running" | "done" | "failed" | "interrupted";
+export type PlatformStatus = "pending" | "running" | "done" | "failed" | "interrupted";
 
 export type JobOverallStatus =
   | "queued"
@@ -16,10 +14,9 @@ export type JobOverallStatus =
   | "failed"
   | "interrupted";
 
-export interface StyleConfig {
-  styleId: StyleId;
+export interface PlatformSettings {
+  platformId: PlatformId;
   enabled: boolean;
-  promptTemplate: string;
   voiceName: string;
   speechRate: number;
 }
@@ -32,19 +29,20 @@ export interface AppSettings {
   safetyMode: "safe_marketing";
   ctaPosition: "end";
   concurrency: 1;
-  styles: StyleConfig[];
+  platforms: PlatformSettings[];
 }
 
-export interface StyleRun {
-  styleId: StyleId;
-  status: StyleStatus;
+export interface PlatformRun {
+  platformId: PlatformId;
+  status: PlatformStatus;
   errorMessage?: string;
+  scriptPath?: string;
   srtPath?: string;
-  wavPath?: string;
   mp4Path?: string;
   captionPath?: string;
   captionText?: string;
   hashtags?: string[];
+  artifactPaths: string[];
   updatedAt: string;
 }
 
@@ -55,13 +53,11 @@ export interface JobRecord {
   title: string;
   description: string;
   affiliateLink?: string;
-  voiceName?: string;
-  speechRate?: number;
   videoPath: string;
   videoMimeType: string;
   videoDurationSec: number;
   overallStatus: JobOverallStatus;
-  styles: StyleRun[];
+  platforms: PlatformRun[];
 }
 
 export interface UploadedGeminiVideo {
@@ -106,6 +102,6 @@ export interface GenerateSocialMetadataInput {
   model: string;
   title: string;
   description: string;
-  styleId: StyleId;
+  platformId: PlatformId;
   scriptText: string;
 }

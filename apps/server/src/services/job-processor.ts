@@ -1,7 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyBaseLogger } from "fastify";
-import type { AppSettings, JobRecord, StyleId, StyleRun } from "../types.js";
+import type { AppSettings, JobRecord, PlatformId, PlatformRun } from "../types.js";
+import { PLATFORM_CONFIG, PLATFORM_LABELS } from "../platform-config.js";
 import { JobsStore } from "../stores/jobs-store.js";
 import { SettingsStore } from "../stores/settings-store.js";
 import { buildScriptPrompt } from "./prompt-builder.js";
@@ -9,32 +10,31 @@ import { GeminiService } from "./gemini-service.js";
 import { OUTPUTS_DIR } from "../utils/paths.js";
 import { buildSrt } from "../utils/srt.js";
 import { combineVideoWithVoiceOver, writeWav24kMono } from "../utils/audio.js";
-import { STYLE_LABELS } from "../constants.js";
 import { ensureSocialMetadata } from "../utils/model-output.js";
-import { sanitizeWindowsFilenameBase } from "../utils/filename.js";
+import { resolveVersionedBaseName } from "../utils/filename.js";
 
 interface QueueItem {
   jobId: string;
-  styleIds?: StyleId[];
+  platformIds?: PlatformId[];
 }
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function findStyleConfig(settings: AppSettings, styleId: StyleId) {
-  return settings.styles.find((style) => style.styleId === styleId);
+function findPlatformSettings(settings: AppSettings, platformId: PlatformId) {
+  return settings.platforms.find((platform) => platform.platformId === platformId);
 }
 
 function fallbackCaption(title: string, description: string): string {
   const shortDescription = description.split(".")[0]?.trim() || description.trim();
-  return `${title} - ${shortDescription}. Cek detail produk di komentar dan deskripsi.`
+  return `${title} - ${shortDescription}. Cek detail produk di keranjang sekarang.`
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 220);
 }
 
-function fallbackHashtags(title: string, styleId: StyleId): string[] {
+function fallbackHashtags(title: string, platformId: PlatformId): string[] {
   const words = title
     .toLowerCase()
     .replace(/[^a-z0-9\s]/gi, " ")
@@ -42,9 +42,15 @@ function fallbackHashtags(title: string, styleId: StyleId): string[] {
     .filter((word) => word.length >= 3)
     .slice(0, 4)
     .map((word) => `#${word}`);
-  const base = ["#reelsfacebook", "#affiliate", "#rekomendasiproduk", "#belanjaonline"];
-  const styleTag = `#${styleId}`;
-  return [...base, styleTag, ...words];
+
+  const baseByPlatform: Record<PlatformId, string[]> = {
+    tiktok: ["#tiktok", "#affiliate", "#fyp", "#belanjaonline"],
+    youtube: ["#shorts", "#youtubeshorts", "#affiliate", "#reviewproduk"],
+    facebook: ["#facebookreels", "#affiliate", "#rekomendasiproduk", "#belanjaonline"],
+    shopee: ["#shopee", "#racunshopee", "#affiliate", "#belanjaonline"]
+  };
+
+  return [...baseByPlatform[platformId], ...words];
 }
 
 function parseGeminiQuotaMessage(message: string): string | undefined {
@@ -53,7 +59,6 @@ function parseGeminiQuotaMessage(message: string): string | undefined {
       error?: {
         code?: number;
         status?: string;
-        message?: string;
         details?: Array<Record<string, unknown>>;
       };
     };
@@ -78,8 +83,16 @@ function parseGeminiQuotaMessage(message: string): string | undefined {
   }
 }
 
+function toOutputUrl(platformId: PlatformId, filename: string): string {
+  return `/outputs/${platformId}/${encodeURIComponent(filename)}`;
+}
+
+function mergeArtifactPaths(current: string[], latest: string[]): string[] {
+  return [...new Set([...current, ...latest])];
+}
+
 export interface IJobProcessor {
-  enqueue(jobId: string, styleIds?: StyleId[]): void;
+  enqueue(jobId: string, platformIds?: PlatformId[]): void;
 }
 
 export class JobProcessor implements IJobProcessor {
@@ -94,8 +107,8 @@ export class JobProcessor implements IJobProcessor {
     private readonly logger: FastifyBaseLogger
   ) {}
 
-  public enqueue(jobId: string, styleIds?: StyleId[]): void {
-    this.queue.push({ jobId, styleIds });
+  public enqueue(jobId: string, platformIds?: PlatformId[]): void {
+    this.queue.push({ jobId, platformIds });
     void this.consume();
   }
 
@@ -143,10 +156,10 @@ export class JobProcessor implements IJobProcessor {
       return;
     }
     const settings = await this.settingsStore.get();
-    const selectedStyleIds =
-      item.styleIds && item.styleIds.length
-        ? item.styleIds
-        : job.styles.map((style) => style.styleId);
+    const selectedPlatformIds =
+      item.platformIds && item.platformIds.length
+        ? item.platformIds
+        : job.platforms.map((platform) => platform.platformId);
 
     await this.jobsStore.update(item.jobId, (current) => ({
       ...current,
@@ -159,35 +172,37 @@ export class JobProcessor implements IJobProcessor {
       uploadedVideo = await this.gemini.uploadVideo(job.videoPath, job.videoMimeType);
     } catch (error) {
       const message = this.toErrorMessage(error);
-      await this.markStylesFailed(item.jobId, selectedStyleIds, message);
+      await this.markPlatformsFailed(item.jobId, selectedPlatformIds, message);
       return;
     }
 
-    for (const styleId of selectedStyleIds) {
-      const styleConfig = findStyleConfig(settings, styleId);
-      if (!styleConfig?.enabled) {
+    for (const platformId of selectedPlatformIds) {
+      const platformSettings = findPlatformSettings(settings, platformId);
+      if (!platformSettings?.enabled) {
         await this.jobsStore.update(item.jobId, (current) => ({
           ...current,
           updatedAt: nowIso(),
-          styles: current.styles.map<StyleRun>((style) =>
-            style.styleId === styleId
+          platforms: current.platforms.map<PlatformRun>((platform) =>
+            platform.platformId === platformId
               ? {
-                  ...style,
+                  ...platform,
                   status: "failed",
-                  errorMessage: "Style dinonaktifkan di settings.",
+                  errorMessage: "Platform dinonaktifkan di settings.",
                   updatedAt: nowIso()
                 }
-              : style
+              : platform
           )
         }));
         continue;
       }
 
-      await this.updateStyle(item.jobId, styleId, "running");
+      await this.updatePlatform(item.jobId, platformId, "running");
+
+      const attemptOutputPaths: string[] = [];
       try {
         const scriptPrompt = buildScriptPrompt({
           settings,
-          style: styleConfig,
+          platformId,
           title: job.title,
           description: job.description,
           videoDurationSec: job.videoDurationSec
@@ -198,16 +213,36 @@ export class JobProcessor implements IJobProcessor {
           video: uploadedVideo
         });
 
-        const outputDir = path.join(OUTPUTS_DIR, job.jobId);
+        const outputDir = path.join(OUTPUTS_DIR, platformId);
         await mkdir(outputDir, { recursive: true });
 
-        const srtPath = path.join(outputDir, `${styleId}.srt`);
-        const srtContent = buildSrt(scriptText, job.videoDurationSec);
+        const baseName = await resolveVersionedBaseName({
+          directory: outputDir,
+          preferredBaseName: job.title,
+          suffixes: [".mp4", ".srt", ".txt", "-caption.txt"]
+        });
+        const scriptFilename = `${baseName}.txt`;
+        const srtFilename = `${baseName}.srt`;
+        const mp4Filename = `${baseName}.mp4`;
+        const captionFilename = `${baseName}-caption.txt`;
+
+        const scriptPath = path.join(outputDir, scriptFilename);
+        const srtPath = path.join(outputDir, srtFilename);
+        const mp4Path = path.join(outputDir, mp4Filename);
+        const captionPath = path.join(outputDir, captionFilename);
+        attemptOutputPaths.push(scriptPath, srtPath, mp4Path, captionPath);
+
+        await writeFile(scriptPath, `${scriptText.trim()}\n`, "utf8");
+        const srtContent = buildSrt(
+          scriptText,
+          job.videoDurationSec,
+          PLATFORM_CONFIG[platformId].srtStyle
+        );
         await writeFile(srtPath, srtContent, "utf8");
 
         const fallbackSocial = {
           caption: fallbackCaption(job.title, job.description),
-          hashtags: fallbackHashtags(job.title, styleId)
+          hashtags: fallbackHashtags(job.title, platformId)
         };
         const socialMetadata = await (async () => {
           try {
@@ -215,7 +250,7 @@ export class JobProcessor implements IJobProcessor {
               model: settings.scriptModel,
               title: job.title,
               description: job.description,
-              styleId,
+              platformId,
               scriptText
             });
             return ensureSocialMetadata(
@@ -225,69 +260,79 @@ export class JobProcessor implements IJobProcessor {
             );
           } catch (error) {
             this.logger.warn(
-              { err: error, jobId: item.jobId, styleId },
+              { err: error, jobId: item.jobId, platformId },
               "Generate caption/hashtags gagal, pakai fallback."
             );
             return fallbackSocial;
           }
         })();
-        const captionPath = path.join(outputDir, `${styleId}-caption.txt`);
         const captionFileParts = [
           socialMetadata.caption,
           socialMetadata.hashtags.join(" "),
           job.affiliateLink?.trim() || ""
-        ].filter((item) => item.length > 0);
-        const captionFileContent = `${captionFileParts.join("\n\n")}\n`;
-        await writeFile(captionPath, captionFileContent, "utf8");
+        ].filter((part) => part.length > 0);
+        await writeFile(captionPath, `${captionFileParts.join("\n\n")}\n`, "utf8");
 
-        const voiceName = job.voiceName || styleConfig.voiceName;
-        const speechRate = job.speechRate ?? styleConfig.speechRate;
+        const tempWavPath = path.join(path.dirname(job.videoPath), `${platformId}-tts.wav`);
         const audio = await this.gemini.generateSpeech({
           model: settings.ttsModel,
           text: scriptText,
-          voiceName,
-          speechRate
+          voiceName: platformSettings.voiceName,
+          speechRate: platformSettings.speechRate
         });
-        const wavPath = path.join(outputDir, `${styleId}.wav`);
-        await writeWav24kMono(audio.data, audio.mimeType, wavPath, speechRate);
-        const mp4Filename = `${sanitizeWindowsFilenameBase(job.title)}.mp4`;
-        const mp4Path = path.join(outputDir, mp4Filename);
+        await writeWav24kMono(
+          audio.data,
+          audio.mimeType,
+          tempWavPath,
+          platformSettings.speechRate
+        );
         await combineVideoWithVoiceOver(
           job.videoPath,
-          wavPath,
+          tempWavPath,
           mp4Path,
           job.videoDurationSec
         );
 
+        const latestUrls = [
+          toOutputUrl(platformId, scriptFilename),
+          toOutputUrl(platformId, srtFilename),
+          toOutputUrl(platformId, mp4Filename),
+          toOutputUrl(platformId, captionFilename)
+        ];
+
         await this.jobsStore.update(item.jobId, (current) => ({
           ...current,
           updatedAt: nowIso(),
-          styles: current.styles.map<StyleRun>((style) =>
-            style.styleId === styleId
+          platforms: current.platforms.map<PlatformRun>((platform) =>
+            platform.platformId === platformId
               ? {
-                  ...style,
+                  ...platform,
                   status: "done",
                   errorMessage: undefined,
-                  srtPath: `/outputs/${current.jobId}/${styleId}.srt`,
-                  wavPath: `/outputs/${current.jobId}/${styleId}.wav`,
-                  mp4Path: `/outputs/${current.jobId}/${encodeURIComponent(mp4Filename)}`,
-                  captionPath: `/outputs/${current.jobId}/${styleId}-caption.txt`,
+                  scriptPath: latestUrls[0],
+                  srtPath: latestUrls[1],
+                  mp4Path: latestUrls[2],
+                  captionPath: latestUrls[3],
                   captionText: socialMetadata.caption,
                   hashtags: socialMetadata.hashtags,
+                  artifactPaths: mergeArtifactPaths(platform.artifactPaths, latestUrls),
                   updatedAt: nowIso()
                 }
-              : style
+              : platform
           )
         }));
         this.logger.info(
-          { jobId: item.jobId, style: styleId },
-          `Style ${STYLE_LABELS[styleId]} selesai.`
+          { jobId: item.jobId, platform: platformId },
+          `Platform ${PLATFORM_LABELS[platformId]} selesai.`
         );
       } catch (error) {
-        await this.updateStyle(item.jobId, styleId, "failed", this.toErrorMessage(error));
+        await Promise.all(
+          attemptOutputPaths.map((outputPath) => rm(outputPath, { recursive: false, force: true }))
+        );
+        await this.updatePlatform(item.jobId, platformId, "failed", this.toErrorMessage(error));
         this.logger.error(
-          { err: error, jobId: item.jobId, styleId },
-          "Style processing gagal."
+          { err: error, jobId: item.jobId, platformId },
+          "Platform processing gagal."
         );
       }
     }
@@ -295,57 +340,57 @@ export class JobProcessor implements IJobProcessor {
     await this.jobsStore.update(item.jobId, (current) => ({
       ...current,
       updatedAt: nowIso(),
-      overallStatus: JobsStore.computeOverallStatus(current.styles)
+      overallStatus: JobsStore.computeOverallStatus(current.platforms)
     }));
   }
 
-  private async markStylesFailed(
+  private async markPlatformsFailed(
     jobId: string,
-    styleIds: StyleId[],
+    platformIds: PlatformId[],
     message: string
   ): Promise<void> {
     await this.jobsStore.update(jobId, (current) => {
-      const nextStyles = current.styles.map<StyleRun>((style) =>
-        styleIds.includes(style.styleId)
+      const nextPlatforms = current.platforms.map<PlatformRun>((platform) =>
+        platformIds.includes(platform.platformId)
           ? {
-              ...style,
+              ...platform,
               status: "failed",
               errorMessage: message,
               updatedAt: nowIso()
             }
-          : style
+          : platform
       );
       return {
         ...current,
         updatedAt: nowIso(),
-        styles: nextStyles,
-        overallStatus: JobsStore.computeOverallStatus(nextStyles)
+        platforms: nextPlatforms,
+        overallStatus: JobsStore.computeOverallStatus(nextPlatforms)
       };
     });
   }
 
-  private async updateStyle(
+  private async updatePlatform(
     jobId: string,
-    styleId: StyleId,
-    status: JobRecord["styles"][number]["status"],
+    platformId: PlatformId,
+    status: JobRecord["platforms"][number]["status"],
     errorMessage?: string
   ): Promise<void> {
     await this.jobsStore.update(jobId, (current) => {
-      const nextStyles = current.styles.map<StyleRun>((style) =>
-        style.styleId === styleId
+      const nextPlatforms = current.platforms.map<PlatformRun>((platform) =>
+        platform.platformId === platformId
           ? {
-              ...style,
+              ...platform,
               status,
               errorMessage,
               updatedAt: nowIso()
             }
-          : style
+          : platform
       );
       return {
         ...current,
         updatedAt: nowIso(),
-        styles: nextStyles,
-        overallStatus: JobsStore.computeOverallStatus(nextStyles)
+        platforms: nextPlatforms,
+        overallStatus: JobsStore.computeOverallStatus(nextPlatforms)
       };
     });
   }

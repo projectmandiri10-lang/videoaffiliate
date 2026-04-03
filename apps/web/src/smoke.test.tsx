@@ -9,13 +9,15 @@ vi.mock("./api", async () => {
   return {
     ...actual,
     createJob: vi.fn(),
+    deleteJob: vi.fn(),
     fetchJobDetail: vi.fn(),
     fetchJobs: vi.fn(),
     fetchSettings: vi.fn(),
     fetchTtsVoices: vi.fn(),
-    openStyleOutputLocation: vi.fn(),
+    openPlatformOutputLocation: vi.fn(),
     previewTtsVoice: vi.fn(),
-    retryStyle: vi.fn(),
+    retryPlatform: vi.fn(),
+    updateJob: vi.fn(),
     updateSettings: vi.fn()
   };
 });
@@ -28,33 +30,29 @@ const mockSettings = {
   safetyMode: "safe_marketing" as const,
   ctaPosition: "end" as const,
   concurrency: 1 as const,
-  styles: [
+  platforms: [
     {
-      styleId: "evergreen" as const,
+      platformId: "tiktok" as const,
       enabled: true,
-      promptTemplate: "Prompt evergreen",
-      voiceName: "Aoede",
-      speechRate: 1
-    },
-    {
-      styleId: "soft_selling" as const,
-      enabled: true,
-      promptTemplate: "Prompt soft selling",
       voiceName: "Leda",
       speechRate: 1
     },
     {
-      styleId: "hard_selling" as const,
+      platformId: "youtube" as const,
       enabled: true,
-      promptTemplate: "Prompt hard selling",
-      voiceName: "Kore",
+      voiceName: "Charon",
       speechRate: 1
     },
     {
-      styleId: "problem_solution" as const,
+      platformId: "facebook" as const,
       enabled: true,
-      promptTemplate: "Prompt problem solution",
-      voiceName: "Puck",
+      voiceName: "Aoede",
+      speechRate: 1
+    },
+    {
+      platformId: "shopee" as const,
+      enabled: true,
+      voiceName: "Kore",
       speechRate: 1
     }
   ]
@@ -101,7 +99,7 @@ beforeEach(() => {
 });
 
 describe("web smoke", () => {
-  it("renders the app shell and settings voice dropdown", async () => {
+  it("renders the app shell and settings platform voice dropdown", async () => {
     render(<App />);
 
     expect(
@@ -116,20 +114,73 @@ describe("web smoke", () => {
         0
       );
     });
+    expect(screen.getByRole("heading", { name: /TikTok/i })).toBeTruthy();
   });
 
   it("shows generate form validation before submit", async () => {
     render(<GeneratePage />);
 
-    expect(await screen.findByRole("button", { name: /generate job/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /generate all platforms/i })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /generate job/i }));
+    fireEvent.click(screen.getByRole("button", { name: /generate all platforms/i }));
 
     expect(
-      await screen.findByText(
-        /Video, judul, deskripsi, affiliate link, voice, dan style wajib diisi./i
-      )
+      await screen.findByText(/Video, judul, deskripsi, dan affiliate link wajib diisi./i)
     ).toBeTruthy();
     expect(api.createJob).not.toHaveBeenCalled();
+  });
+
+  it("renders jobs page with multi-platform detail rows", async () => {
+    vi.mocked(api.fetchJobs).mockResolvedValue([
+      {
+        jobId: "job-1",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        title: "Job Satu",
+        description: "Deskripsi Job",
+        affiliateLink: "https://contoh-affiliate.test/job-1",
+        videoPath: "C:/video.mp4",
+        videoMimeType: "video/mp4",
+        videoDurationSec: 20,
+        overallStatus: "failed",
+        platforms: [
+          {
+            platformId: "tiktok",
+            status: "failed",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            errorMessage: "fetch failed",
+            artifactPaths: []
+          },
+          {
+            platformId: "youtube",
+            status: "pending",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            artifactPaths: []
+          },
+          {
+            platformId: "facebook",
+            status: "pending",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            artifactPaths: []
+          },
+          {
+            platformId: "shopee",
+            status: "pending",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            artifactPaths: []
+          }
+        ]
+      }
+    ]);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
+
+    expect(await screen.findByRole("heading", { name: /detail job/i })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /job baru/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Job Satu").length).toBeGreaterThan(0);
+    expect(screen.getByText("TikTok")).toBeTruthy();
+    expect(screen.getByText("Shopee")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /hapus job/i })).toBeTruthy();
   });
 });

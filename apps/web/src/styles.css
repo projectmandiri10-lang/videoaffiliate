@@ -126,6 +126,31 @@ button:hover {
   grid-template-columns: 320px 1fr;
 }
 
+.jobs-sidebar {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.section-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.section-card h2,
+.section-card h4 {
+  margin: 0;
+}
+
+.section-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .row-head {
   display: flex;
   justify-content: space-between;
@@ -135,6 +160,14 @@ button:hover {
 .job-list {
   display: grid;
   gap: 8px;
+}
+
+.job-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .job-item {
@@ -151,10 +184,44 @@ button:hover {
   font-size: 0.85rem;
 }
 
+.detail-box {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.detail-box p {
+  margin: 0;
+}
+
 .detail-box table {
   width: 100%;
   min-width: 700px;
   border-collapse: collapse;
+}
+
+.meta-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin-bottom: 14px;
+}
+
+.meta-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fbfcff;
+  display: grid;
+  gap: 6px;
+}
+
+.section-divider {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 .detail-box th,
@@ -182,6 +249,27 @@ button:hover {
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.form-grid-2 {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: #f1bbbb;
+}
+
+.danger-button:hover {
+  border-color: var(--danger);
 }
 
 .output-links {
@@ -338,6 +426,15 @@ button:hover {
   .row-head {
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .job-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-grid-2 {
+    grid-template-columns: 1fr;
   }
 }
 

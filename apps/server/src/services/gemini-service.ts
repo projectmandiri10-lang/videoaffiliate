@@ -249,7 +249,7 @@ export class GeminiService {
     const prompt = buildReelsMetadataPrompt({
       title: input.title,
       description: input.description,
-      styleId: input.styleId,
+      platformId: input.platformId,
       scriptText: input.scriptText
     });
 

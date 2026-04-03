@@ -6,33 +6,29 @@
   "safetyMode": "safe_marketing",
   "ctaPosition": "end",
   "concurrency": 1,
-  "styles": [
+  "platforms": [
     {
-      "styleId": "evergreen",
+      "platformId": "tiktok",
       "enabled": true,
-      "promptTemplate": "Buat naskah voice-over gaya evergreen untuk video affiliate. Tekankan manfaat jangka panjang produk, bahasa natural, tidak berlebihan, CTA di akhir (arahkan ke komentar dan deskripsi).",
-      "voiceName": "Aoede",
-      "speechRate": 1
-    },
-    {
-      "styleId": "soft_selling",
-      "enabled": true,
-      "promptTemplate": "Buat naskah voice-over gaya soft selling. Bangun empati, jelaskan problem pengguna, tawarkan produk sebagai solusi halus, CTA di akhir (arahkan ke komentar dan deskripsi).",
       "voiceName": "Leda",
       "speechRate": 1
     },
     {
-      "styleId": "hard_selling",
+      "platformId": "youtube",
       "enabled": true,
-      "promptTemplate": "Buat naskah voice-over gaya hard selling dengan urgency wajar. Fokus value, promo, alasan beli sekarang, tetap aman tanpa klaim absolut, CTA di akhir (arahkan ke komentar dan deskripsi).",
-      "voiceName": "Kore",
+      "voiceName": "Charon",
       "speechRate": 1
     },
     {
-      "styleId": "problem_solution",
+      "platformId": "facebook",
       "enabled": true,
-      "promptTemplate": "Buat naskah voice-over edukasi problem-solution. Awali pain point, jelaskan penyebab singkat, masukkan solusi produk secara praktis, CTA di akhir (arahkan ke komentar dan deskripsi).",
-      "voiceName": "Puck",
+      "voiceName": "Aoede",
+      "speechRate": 1
+    },
+    {
+      "platformId": "shopee",
+      "enabled": true,
+      "voiceName": "Kore",
       "speechRate": 1
     }
   ]

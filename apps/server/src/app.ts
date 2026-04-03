@@ -16,21 +16,23 @@ import {
   GEMINI_EXCITED_PRESETS,
   GEMINI_TTS_VOICES,
   MAX_UPLOAD_BYTES,
+  PLATFORM_ORDER,
   findTtsVoiceByName
 } from "./constants.js";
 import { JobsStore } from "./stores/jobs-store.js";
 import { SettingsStore } from "./stores/settings-store.js";
-import type { GenerateSpeechInput, JobRecord, StyleId } from "./types.js";
+import type { GenerateSpeechInput, JobRecord, PlatformId } from "./types.js";
 import {
-  parseRetryStyleId,
+  parseJobUpdateInput,
+  parseRetryPlatformId,
   parseSettings,
-  parseSpeechRate,
   parseTtsPreviewInput
 } from "./validation.js";
 import {
   OUTPUTS_DIR,
   UPLOADS_DIR,
-  WEB_DIST_DIR
+  WEB_DIST_DIR,
+  outputUrlToAbsolutePath
 } from "./utils/paths.js";
 import { probeVideoDuration } from "./utils/video.js";
 import type { IJobProcessor } from "./services/job-processor.js";
@@ -60,10 +62,11 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function createStyleRuns(styleIds: StyleId[]): JobRecord["styles"] {
-  return styleIds.map((styleId) => ({
-    styleId,
+function createPlatformRuns(platformIds: PlatformId[]): JobRecord["platforms"] {
+  return platformIds.map((platformId) => ({
+    platformId,
     status: "pending",
+    artifactPaths: [],
     updatedAt: nowIso()
   }));
 }
@@ -77,16 +80,35 @@ function pickVideoExtension(part: MultipartFile): string {
   return fromMime ? `.${fromMime}` : ".mp4";
 }
 
-function sendNormalizedError(
-  reply: FastifyReply,
-  error: unknown,
-  message: string
-) {
+function sendNormalizedError(reply: FastifyReply, error: unknown, message: string) {
   const normalized = normalizeApiError(error);
   return reply.code(normalized.statusCode).send({
     message,
     error: normalized.error
   });
+}
+
+function isJobEditable(job: JobRecord): boolean {
+  return ["queued", "failed", "interrupted"].includes(job.overallStatus);
+}
+
+function isJobDeletable(job: JobRecord): boolean {
+  return job.overallStatus !== "running";
+}
+
+function resolvePlatformFolderPath(
+  job: JobRecord,
+  platformId: PlatformId
+): string {
+  const platform = job.platforms.find((item) => item.platformId === platformId);
+  const latestOutput = [
+    platform?.mp4Path,
+    platform?.scriptPath,
+    platform?.srtPath,
+    platform?.captionPath
+  ].find(Boolean);
+  const absoluteOutput = latestOutput ? outputUrlToAbsolutePath(latestOutput) : undefined;
+  return absoluteOutput ? path.dirname(absoluteOutput) : path.join(OUTPUTS_DIR, platformId);
 }
 
 async function maybeRegisterWebStatic(app: FastifyInstance): Promise<void> {
@@ -242,8 +264,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.get("/api/jobs", async (_request, reply) => {
     try {
-      const jobs = await options.jobsStore.list();
-      return jobs;
+      return await options.jobsStore.list();
     } catch (error) {
       return sendNormalizedError(reply, error, "Gagal memuat daftar job.");
     }
@@ -263,6 +284,77 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return job;
   });
 
+  app.put("/api/jobs/:jobId", async (request, reply) => {
+    const params = request.params as { jobId: string };
+    let job;
+    try {
+      job = await options.jobsStore.getById(params.jobId);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memuat job.");
+    }
+    if (!job) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+    if (!isJobEditable(job)) {
+      return reply.code(409).send({
+        message: "Job hanya bisa diedit saat status queued, failed, atau interrupted."
+      });
+    }
+
+    let payload;
+    try {
+      payload = parseJobUpdateInput(request.body);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Data job tidak valid.");
+    }
+
+    try {
+      const updated = await options.jobsStore.update(params.jobId, (current) => ({
+        ...current,
+        title: payload.title,
+        description: payload.description,
+        affiliateLink: payload.affiliateLink,
+        updatedAt: nowIso()
+      }));
+
+      if (!updated) {
+        return reply.code(404).send({ message: "Job tidak ditemukan." });
+      }
+
+      return reply.send(updated);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memperbarui job.");
+    }
+  });
+
+  app.delete("/api/jobs/:jobId", async (request, reply) => {
+    const params = request.params as { jobId: string };
+    let job;
+    try {
+      job = await options.jobsStore.getById(params.jobId);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memuat job.");
+    }
+    if (!job) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+    if (!isJobDeletable(job)) {
+      return reply.code(409).send({
+        message: "Job dengan status running tidak bisa dihapus."
+      });
+    }
+
+    try {
+      const removed = await options.jobsStore.delete(params.jobId);
+      if (!removed) {
+        return reply.code(404).send({ message: "Job tidak ditemukan." });
+      }
+      return reply.send({ ok: true });
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal menghapus job.");
+    }
+  });
+
   app.post("/api/jobs/:jobId/retry", async (request, reply) => {
     const params = request.params as { jobId: string };
     const job = await options.jobsStore.getById(params.jobId);
@@ -270,23 +362,23 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return reply.code(404).send({ message: "Job tidak ditemukan." });
     }
 
-    let styleId: StyleId;
+    let platformId: PlatformId;
     try {
-      styleId = parseRetryStyleId(request.body);
+      platformId = parseRetryPlatformId(request.body);
     } catch (error) {
       return reply.code(400).send({
-        message: "styleId tidak valid.",
+        message: "platformId tidak valid.",
         error: (error as { message?: string })?.message
       });
     }
 
-    const style = job.styles.find((item) => item.styleId === styleId);
-    if (!style) {
-      return reply.code(404).send({ message: "Style pada job tidak ditemukan." });
+    const platform = job.platforms.find((item) => item.platformId === platformId);
+    if (!platform) {
+      return reply.code(404).send({ message: "Platform pada job tidak ditemukan." });
     }
-    if (!["failed", "interrupted"].includes(style.status)) {
+    if (!["failed", "interrupted"].includes(platform.status)) {
       return reply.code(400).send({
-        message: "Retry hanya untuk style dengan status failed/interrupted."
+        message: "Retry hanya untuk platform dengan status failed/interrupted."
       });
     }
 
@@ -294,8 +386,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ...current,
       updatedAt: nowIso(),
       overallStatus: "queued",
-      styles: current.styles.map((item) =>
-        item.styleId === styleId
+      platforms: current.platforms.map((item) =>
+        item.platformId === platformId
           ? {
               ...item,
               status: "pending",
@@ -306,7 +398,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       )
     }));
 
-    options.processor.enqueue(params.jobId, [styleId]);
+    options.processor.enqueue(params.jobId, [platformId]);
     return reply.send({ ok: true });
   });
 
@@ -317,22 +409,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return reply.code(404).send({ message: "Job tidak ditemukan." });
     }
 
-    let styleId: StyleId;
+    let platformId: PlatformId;
     try {
-      styleId = parseRetryStyleId(request.body);
+      platformId = parseRetryPlatformId(request.body);
     } catch (error) {
       return reply.code(400).send({
-        message: "styleId tidak valid.",
+        message: "platformId tidak valid.",
         error: (error as { message?: string })?.message
       });
     }
 
-    const style = job.styles.find((item) => item.styleId === styleId);
-    if (!style) {
-      return reply.code(404).send({ message: "Style pada job tidak ditemukan." });
+    const platform = job.platforms.find((item) => item.platformId === platformId);
+    if (!platform) {
+      return reply.code(404).send({ message: "Platform pada job tidak ditemukan." });
     }
 
-    const outputDir = path.join(OUTPUTS_DIR, job.jobId);
+    const outputDir = resolvePlatformFolderPath(job, platformId);
     try {
       await mkdir(outputDir, { recursive: true });
       await openOutputLocation(outputDir);
@@ -354,9 +446,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     let title = "";
     let description = "";
     let affiliateLink = "";
-    let styleIdRaw = "";
-    let voiceNameRaw = "";
-    let speechRateRaw = "";
     let videoPath = "";
     let videoMimeType = "video/mp4";
     let uploadDir = "";
@@ -397,15 +486,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         if (part.type === "field" && part.fieldname === "affiliateLink") {
           affiliateLink = String(part.value || "").trim();
         }
-        if (part.type === "field" && part.fieldname === "styleId") {
-          styleIdRaw = String(part.value || "").trim();
-        }
-        if (part.type === "field" && part.fieldname === "voiceName") {
-          voiceNameRaw = String(part.value || "").trim();
-        }
-        if (part.type === "field" && part.fieldname === "speechRate") {
-          speechRateRaw = String(part.value || "").trim();
-        }
         if (part.type === "file") {
           part.file.resume();
         }
@@ -419,53 +499,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           .code(400)
           .send({ message: "Field title, description, dan affiliateLink wajib diisi." });
       }
-      if (!styleIdRaw) {
-        return reply.code(400).send({ message: "Field styleId wajib diisi." });
-      }
-
-      let selectedStyleId: StyleId;
-      try {
-        selectedStyleId = parseRetryStyleId({ styleId: styleIdRaw });
-      } catch (error) {
-        return reply.code(400).send({
-          message: "styleId tidak valid.",
-          error: (error as { message?: string })?.message
-        });
-      }
 
       const settings = await options.settingsStore.get();
-      const selectedStyle = settings.styles.find(
-        (style) => style.styleId === selectedStyleId
-      );
-      if (!selectedStyle?.enabled) {
-        return reply.code(400).send({
-          message: `Style ${selectedStyleId} tidak aktif di settings.`
-        });
-      }
-
-      let selectedVoiceName = selectedStyle.voiceName;
-      if (voiceNameRaw) {
-        const voice = findTtsVoiceByName(voiceNameRaw);
-        if (!voice) {
-          return reply.code(400).send({
-            message: `Voice ${voiceNameRaw} tidak tersedia pada katalog Gemini.`
-          });
-        }
-        selectedVoiceName = voice.voiceName;
-      }
-
-      let selectedSpeechRate = selectedStyle.speechRate;
-      if (speechRateRaw) {
-        try {
-          selectedSpeechRate = parseSpeechRate(speechRateRaw);
-        } catch (error) {
-          return reply.code(400).send({
-            message: "speechRate tidak valid (range 0.7 - 1.3).",
-            error: (error as { message?: string })?.message
-          });
-        }
-      }
-
       const durationSec = await durationProbe(videoPath);
       if (durationSec > settings.maxVideoSeconds) {
         return reply.code(400).send({
@@ -481,17 +516,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         title,
         description,
         affiliateLink,
-        voiceName: selectedVoiceName,
-        speechRate: selectedSpeechRate,
         videoPath,
         videoMimeType,
         videoDurationSec: durationSec,
         overallStatus: "queued",
-        styles: createStyleRuns([selectedStyleId])
+        platforms: createPlatformRuns(PLATFORM_ORDER)
       };
       await options.jobsStore.create(job);
       keepUploadDir = true;
-      options.processor.enqueue(jobId, [selectedStyleId]);
+      options.processor.enqueue(jobId, PLATFORM_ORDER);
 
       return reply.code(202).send({
         jobId,

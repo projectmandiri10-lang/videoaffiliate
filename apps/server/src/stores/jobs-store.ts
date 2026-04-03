@@ -1,12 +1,42 @@
-import { rm } from "node:fs/promises";
-import { MAX_HISTORY } from "../constants.js";
-import type { JobRecord, JobOverallStatus, StyleRun, StyleStatus } from "../types.js";
-import { JsonFile } from "../utils/json-file.js";
-import { JOBS_FILE, OUTPUTS_DIR, UPLOADS_DIR } from "../utils/paths.js";
+import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
+import { MAX_HISTORY } from "../constants.js";
+import type { JobOverallStatus, JobRecord, PlatformRun, PlatformStatus } from "../types.js";
+import { JsonFile } from "../utils/json-file.js";
+import { JOBS_FILE, UPLOADS_DIR, outputUrlToAbsolutePath } from "../utils/paths.js";
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function listOutputArtifacts(job: JobRecord): string[] {
+  const files = new Set<string>();
+  for (const platform of job.platforms) {
+    for (const output of [
+      ...(platform.artifactPaths || []),
+      platform.scriptPath,
+      platform.srtPath,
+      platform.mp4Path,
+      platform.captionPath
+    ]) {
+      if (!output) {
+        continue;
+      }
+      const absolutePath = outputUrlToAbsolutePath(output);
+      if (absolutePath) {
+        files.add(absolutePath);
+      }
+    }
+  }
+  return [...files];
+}
+
+function listOutputDirectories(job: JobRecord): string[] {
+  const directories = new Set<string>();
+  for (const filePath of listOutputArtifacts(job)) {
+    directories.add(path.dirname(filePath));
+  }
+  return [...directories];
 }
 
 export class JobsStore {
@@ -27,7 +57,7 @@ export class JobsStore {
       const next = [job, ...jobs];
       const removed = next.slice(MAX_HISTORY);
       const kept = next.slice(0, MAX_HISTORY);
-      await Promise.all(removed.map((item) => this.cleanupJobArtifacts(item.jobId)));
+      await Promise.all(removed.map((item) => this.cleanupJobArtifacts(item)));
       return kept;
     });
     return job;
@@ -50,7 +80,10 @@ export class JobsStore {
       }
       updated = updater({
         ...current,
-        styles: current.styles.map((style) => ({ ...style }))
+        platforms: current.platforms.map((platform) => ({
+          ...platform,
+          artifactPaths: [...platform.artifactPaths]
+        }))
       });
       if (updated) {
         next[index] = updated;
@@ -58,6 +91,27 @@ export class JobsStore {
       return next;
     });
     return updated;
+  }
+
+  public async delete(jobId: string): Promise<boolean> {
+    let removed: JobRecord | undefined;
+    await this.file.update((jobs) => {
+      const next = jobs.filter((job) => {
+        if (job.jobId === jobId) {
+          removed = job;
+          return false;
+        }
+        return true;
+      });
+      return next;
+    });
+
+    if (removed) {
+      await this.cleanupJobArtifacts(removed);
+      return true;
+    }
+
+    return false;
   }
 
   public async markRunningAsInterrupted(): Promise<void> {
@@ -70,27 +124,27 @@ export class JobsStore {
           ...job,
           updatedAt: nowIso(),
           overallStatus: "interrupted",
-          styles: job.styles.map((style) =>
-            style.status === "running"
+          platforms: job.platforms.map((platform) =>
+            platform.status === "running"
               ? {
-                  ...style,
+                  ...platform,
                   status: "interrupted",
                   updatedAt: nowIso(),
                   errorMessage: "Server restart saat job berjalan."
                 }
-              : style
+              : platform
           )
         };
       })
     );
   }
 
-  public static computeOverallStatus(styles: StyleRun[]): JobOverallStatus {
-    const done = styles.filter((style) => style.status === "done").length;
-    const failed = styles.filter((style) => style.status === "failed").length;
-    const interrupted = styles.filter((style) => style.status === "interrupted").length;
-    const running = styles.filter((style) => style.status === "running").length;
-    const pending = styles.filter((style) => style.status === "pending").length;
+  public static computeOverallStatus(platforms: PlatformRun[]): JobOverallStatus {
+    const done = platforms.filter((platform) => platform.status === "done").length;
+    const failed = platforms.filter((platform) => platform.status === "failed").length;
+    const interrupted = platforms.filter((platform) => platform.status === "interrupted").length;
+    const running = platforms.filter((platform) => platform.status === "running").length;
+    const pending = platforms.filter((platform) => platform.status === "pending").length;
 
     if (running > 0) {
       return "running";
@@ -110,18 +164,18 @@ export class JobsStore {
     return "failed";
   }
 
-  public static setStyleStatus(
-    styles: StyleRun[],
-    styleId: StyleRun["styleId"],
-    status: StyleStatus,
+  public static setPlatformStatus(
+    platforms: PlatformRun[],
+    platformId: PlatformRun["platformId"],
+    status: PlatformStatus,
     message?: string
-  ): StyleRun[] {
-    return styles.map((style) => {
-      if (style.styleId !== styleId) {
-        return style;
+  ): PlatformRun[] {
+    return platforms.map((platform) => {
+      if (platform.platformId !== platformId) {
+        return platform;
       }
       return {
-        ...style,
+        ...platform,
         status,
         updatedAt: nowIso(),
         errorMessage: message
@@ -129,10 +183,22 @@ export class JobsStore {
     });
   }
 
-  private async cleanupJobArtifacts(jobId: string): Promise<void> {
-    await Promise.all([
-      rm(path.join(OUTPUTS_DIR, jobId), { recursive: true, force: true }),
-      rm(path.join(UPLOADS_DIR, jobId), { recursive: true, force: true })
-    ]);
+  private async cleanupJobArtifacts(job: JobRecord): Promise<void> {
+    await Promise.all(
+      listOutputArtifacts(job).map((filePath) => rm(filePath, { recursive: false, force: true }))
+    );
+
+    await rm(path.join(UPLOADS_DIR, job.jobId), { recursive: true, force: true });
+
+    for (const directory of listOutputDirectories(job)) {
+      try {
+        const entries = await readdir(directory);
+        if (entries.length === 0) {
+          await rm(directory, { recursive: false, force: true });
+        }
+      } catch {
+        // Ignore cleanup errors for empty folder removal.
+      }
+    }
   }
 }
