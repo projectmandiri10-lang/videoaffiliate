@@ -1,7 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createJob } from "../api";
+import type { JobCreationTransition } from "../job-creation";
 
-export function GeneratePage() {
+interface GeneratePageProps {
+  onSubmissionStateChange?: (transition: JobCreationTransition) => void;
+}
+
+export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
   const [video, setVideo] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -10,6 +15,14 @@ export function GeneratePage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const resetForm = () => {
     setVideo(null);
@@ -30,19 +43,55 @@ export function GeneratePage() {
     }
 
     setLoading(true);
+    const requestId = Date.now();
+    const trimmedTitle = title.trim();
+    const trimmedDescription = description.trim();
+    const trimmedAffiliateLink = affiliateLink.trim();
+
+    onSubmissionStateChange?.({
+      requestId,
+      title: trimmedTitle,
+      phase: "uploading"
+    });
+
     try {
       const result = await createJob({
         video,
-        title: title.trim(),
-        description: description.trim(),
-        affiliateLink: affiliateLink.trim()
+        title: trimmedTitle,
+        description: trimmedDescription,
+        affiliateLink: trimmedAffiliateLink
       });
-      setMessage(`Job ${result.jobId} dibuat dengan status ${result.status}.`);
-      resetForm();
+      if (mountedRef.current) {
+        resetForm();
+      }
+      if (onSubmissionStateChange) {
+        onSubmissionStateChange({
+          requestId,
+          title: trimmedTitle,
+          phase: "created",
+          jobId: result.jobId,
+          status: result.status
+        });
+      } else if (mountedRef.current) {
+        setMessage(`Job ${result.jobId} dibuat dengan status ${result.status}.`);
+      }
     } catch (submitError) {
-      setError((submitError as Error).message);
+      const nextError = (submitError as Error).message;
+      if (onSubmissionStateChange) {
+        onSubmissionStateChange({
+          requestId,
+          title: trimmedTitle,
+          phase: "failed",
+          error: nextError
+        });
+      }
+      if (mountedRef.current) {
+        setError(nextError);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 

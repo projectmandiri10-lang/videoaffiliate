@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   createJob,
   deleteJob,
@@ -7,6 +7,7 @@ import {
   toAbsoluteOutputUrl,
   updateJob
 } from "../api";
+import type { JobCreationTransition } from "../job-creation";
 import { StatusBadge } from "../components/StatusBadge";
 import type { JobRecord, PlatformId } from "../types";
 
@@ -18,6 +19,11 @@ const PLATFORM_LABEL: Record<PlatformId, string> = {
 };
 
 type PanelMode = "view" | "create" | "edit";
+
+interface JobsPageProps {
+  jobCreationState?: JobCreationTransition | null;
+  onJobCreationStateHandled?: (requestId: number) => void;
+}
 
 interface CreateFormState {
   video: File | null;
@@ -53,7 +59,52 @@ function isJobDeletable(job: JobRecord): boolean {
   return job.overallStatus !== "running";
 }
 
-export function JobsPage() {
+function getJobProgress(job: JobRecord): {
+  percent: number;
+  summary: string;
+  detail: string;
+  isAnimated: boolean;
+} {
+  const total = Math.max(job.platforms.length, 1);
+  const doneCount = job.platforms.filter((platform) => platform.status === "done").length;
+  const runningCount = job.platforms.filter((platform) => platform.status === "running").length;
+  const failedCount = job.platforms.filter(
+    (platform) => platform.status === "failed" || platform.status === "interrupted"
+  ).length;
+  const pendingCount = total - doneCount - runningCount - failedCount;
+
+  let percent = Math.round(((doneCount + failedCount + runningCount * 0.55) / total) * 100);
+  if (job.overallStatus === "queued") {
+    percent = Math.max(percent, 8);
+  }
+  if (job.overallStatus === "running") {
+    percent = Math.max(percent, 18);
+  }
+  if (["success", "partial_success", "failed", "interrupted"].includes(job.overallStatus)) {
+    percent = 100;
+  }
+
+  const summary =
+    job.overallStatus === "queued"
+      ? "Job masuk antrean dan sedang menunggu diproses."
+      : job.overallStatus === "running"
+        ? `Sedang memproses ${runningCount || 1} dari ${total} platform.`
+        : "Job sudah mencapai status akhir.";
+
+  const detail = `Selesai ${doneCount}, berjalan ${runningCount}, menunggu ${pendingCount}, terkendala ${failedCount}.`;
+
+  return {
+    percent: Math.min(percent, 100),
+    summary,
+    detail,
+    isAnimated: ["queued", "running"].includes(job.overallStatus)
+  };
+}
+
+export function JobsPage({
+  jobCreationState = null,
+  onJobCreationStateHandled
+}: JobsPageProps) {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [panelMode, setPanelMode] = useState<PanelMode>("view");
@@ -67,6 +118,8 @@ export function JobsPage() {
   const [createFileInputKey, setCreateFileInputKey] = useState(0);
   const [createForm, setCreateForm] = useState<CreateFormState>(EMPTY_CREATE_FORM);
   const [editForm, setEditForm] = useState<EditFormState>(EMPTY_EDIT_FORM);
+  const selectedJobIdRef = useRef("");
+  const jobCreationStateRef = useRef<JobCreationTransition | null>(jobCreationState);
 
   const selected = useMemo(() => {
     if (!jobs.length) {
@@ -74,6 +127,21 @@ export function JobsPage() {
     }
     return jobs.find((job) => job.jobId === selectedJobId) ?? jobs[0] ?? null;
   }, [jobs, selectedJobId]);
+
+  const selectedProgress = useMemo(() => {
+    if (!selected) {
+      return null;
+    }
+    return getJobProgress(selected);
+  }, [selected]);
+
+  useEffect(() => {
+    selectedJobIdRef.current = selectedJobId;
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    jobCreationStateRef.current = jobCreationState;
+  }, [jobCreationState]);
 
   const resetCreateForm = () => {
     setCreateForm(EMPTY_CREATE_FORM);
@@ -92,17 +160,17 @@ export function JobsPage() {
     });
   };
 
-  const refreshJobs = async (preferredJobId?: string) => {
+  const refreshJobs = useCallback(async (preferredJobId?: string) => {
     try {
       setJobsLoading(true);
       const list = await fetchJobs();
-      const targetJobId = preferredJobId ?? selectedJobId;
+      const targetJobId = preferredJobId ?? selectedJobIdRef.current;
       const nextSelected = list.find((job) => job.jobId === targetJobId) ?? list[0] ?? null;
       setJobs(list);
       setSelectedJobId(nextSelected?.jobId ?? "");
       resetEditForm(nextSelected);
       if (!nextSelected) {
-        setPanelMode("create");
+        setPanelMode(jobCreationStateRef.current?.phase === "uploading" ? "view" : "create");
       }
       setError("");
       return list;
@@ -112,24 +180,53 @@ export function JobsPage() {
     } finally {
       setJobsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refreshJobs();
-  }, []);
+  }, [refreshJobs]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       void refreshJobs();
     }, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [refreshJobs]);
 
   useEffect(() => {
     if (panelMode === "edit") {
       resetEditForm(selected);
     }
   }, [panelMode, selected?.jobId]);
+
+  useEffect(() => {
+    if (!jobCreationState) {
+      return;
+    }
+
+    if (jobCreationState.phase === "uploading") {
+      setPanelMode("view");
+      setMessage("");
+      setError("");
+      return;
+    }
+
+    if (jobCreationState.phase === "created" && jobCreationState.jobId) {
+      setPanelMode("view");
+      setMessage(`Job ${jobCreationState.jobId} dibuat dengan status ${jobCreationState.status}.`);
+      setError("");
+      void refreshJobs(jobCreationState.jobId);
+      onJobCreationStateHandled?.(jobCreationState.requestId);
+      return;
+    }
+
+    if (jobCreationState.phase === "failed") {
+      setError(jobCreationState.error ?? "Gagal membuat job.");
+      setMessage("");
+      setPanelMode((current) => (jobs.length ? current : "create"));
+      onJobCreationStateHandled?.(jobCreationState.requestId);
+    }
+  }, [jobCreationState, jobs.length, onJobCreationStateHandled, refreshJobs]);
 
   const openCreatePanel = () => {
     resetCreateForm();
@@ -392,6 +489,56 @@ export function JobsPage() {
             )}
           </div>
         </div>
+
+        {jobCreationState?.phase === "uploading" && (
+          <div className="progress-panel">
+            <div className="progress-head">
+              <div>
+                <strong>Mengirim Job Baru</strong>
+                <p className="section-note">
+                  Video untuk "{jobCreationState.title}" sedang diunggah dan disiapkan.
+                </p>
+              </div>
+              <strong className="progress-label">Uploading...</strong>
+            </div>
+            <div
+              className="job-progress-track"
+              role="progressbar"
+              aria-label={`Upload job ${jobCreationState.title}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuetext="Sedang mengunggah video"
+            >
+              <div className="job-progress-fill is-indeterminate" />
+            </div>
+          </div>
+        )}
+
+        {panelMode === "view" && selected && selectedProgress?.isAnimated && (
+          <div className="progress-panel">
+            <div className="progress-head">
+              <div>
+                <strong>Progress Job Aktif</strong>
+                <p className="section-note">{selectedProgress.summary}</p>
+              </div>
+              <strong className="progress-label">{selectedProgress.percent}%</strong>
+            </div>
+            <div
+              className="job-progress-track"
+              role="progressbar"
+              aria-label={`Progress job ${selected.title}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={selectedProgress.percent}
+            >
+              <div
+                className="job-progress-fill is-animated"
+                style={{ width: `${selectedProgress.percent}%` }}
+              />
+            </div>
+            <p className="progress-meta">{selectedProgress.detail}</p>
+          </div>
+        )}
 
         {panelMode === "create" && (
           <div className="section-card">
@@ -678,3 +825,4 @@ export function JobsPage() {
     </section>
   );
 }
+

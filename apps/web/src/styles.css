@@ -151,6 +151,75 @@ button:hover {
   font-size: 0.9rem;
 }
 
+.progress-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef4ff 100%);
+  display: grid;
+  gap: 10px;
+}
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.progress-label {
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.job-progress-track {
+  position: relative;
+  overflow: hidden;
+  height: 12px;
+  border-radius: 999px;
+  background: #dce7fb;
+}
+
+.job-progress-fill {
+  position: relative;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1f6feb 0%, #58a6ff 100%);
+  transition: width 0.35s ease;
+}
+
+.job-progress-fill.is-animated::after,
+.job-progress-fill.is-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.18) 25%,
+    rgba(255, 255, 255, 0.42) 25%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(255, 255, 255, 0.18) 75%,
+    rgba(255, 255, 255, 0.42) 75%,
+    rgba(255, 255, 255, 0.42) 100%
+  );
+  background-size: 28px 28px;
+  animation: progress-stripes 1s linear infinite;
+}
+
+.job-progress-fill.is-indeterminate {
+  width: 40%;
+  min-width: 140px;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+
+.progress-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .row-head {
   display: flex;
   justify-content: space-between;
@@ -385,6 +454,27 @@ button:hover {
   border-color: #bec7dd;
 }
 
+@keyframes progress-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 28px 0;
+  }
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-90%);
+  }
+  50% {
+    transform: translateX(130%);
+  }
+  100% {
+    transform: translateX(-90%);
+  }
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 18px;
@@ -431,6 +521,11 @@ button:hover {
   .job-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .progress-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .form-grid-2 {

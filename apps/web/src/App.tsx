@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { JobCreationTransition } from "./job-creation";
 import { GeneratePage } from "./pages/GeneratePage";
 import { JobsPage } from "./pages/JobsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -13,6 +14,18 @@ const TAB_LABEL: Record<TabId, string> = {
 
 export default function App() {
   const [tab, setTab] = useState<TabId>("generate");
+  const [jobCreationState, setJobCreationState] = useState<JobCreationTransition | null>(null);
+
+  const handleSubmissionStateChange = (transition: JobCreationTransition) => {
+    setJobCreationState(transition);
+    if (transition.phase === "uploading") {
+      setTab("jobs");
+    }
+  };
+
+  const handleSubmissionStateHandled = (requestId: number) => {
+    setJobCreationState((current) => (current?.requestId === requestId ? null : current));
+  };
 
   return (
     <main className="app-shell">
@@ -30,8 +43,15 @@ export default function App() {
           ))}
         </nav>
       </header>
-      {tab === "generate" && <GeneratePage />}
-      {tab === "jobs" && <JobsPage />}
+      {tab === "generate" && (
+        <GeneratePage onSubmissionStateChange={handleSubmissionStateChange} />
+      )}
+      {tab === "jobs" && (
+        <JobsPage
+          jobCreationState={jobCreationState}
+          onJobCreationStateHandled={handleSubmissionStateHandled}
+        />
+      )}
       {tab === "settings" && <SettingsPage />}
     </main>
   );
