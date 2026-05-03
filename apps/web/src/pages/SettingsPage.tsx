@@ -110,8 +110,8 @@ export function SettingsPage() {
       <h2>Settings</h2>
       <p className="section-note">
         Tone, hook, dan subtitle style dikunci oleh sistem. Isi `Script Model` dan `TTS Model`
-        sesuai provider masing-masing: script/caption lewat SnifoxAI, voice-over lewat Gemini TTS
-        direct. Jika upstream Google di SnifoxAI gagal, server akan fallback otomatis ke model
+        sesuai provider masing-masing: script/caption lewat gateway LiteLLM, voice-over lewat
+        Gemini TTS direct. Jika model utama di LiteLLM gagal, server akan fallback otomatis ke model
         text-only yang tersedia. Jika Gemini TTS ditolak, server hanya akan fallback ke voice
         Windows lokal bila ada voice Indonesia; kalau tidak ada, job akan gagal dengan pesan yang
         jelas.
@@ -125,7 +125,7 @@ export function SettingsPage() {
               setSettings({ ...settings, scriptModel: event.target.value })
             }
           />
-          <span className="small">Contoh SnifoxAI: google/gemini-3-flash-preview.</span>
+          <span className="small">Contoh LiteLLM: openai/gpt-5-mini.</span>
         </label>
         <label>
           TTS Model

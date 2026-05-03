@@ -1,4 +1,4 @@
-# Auto Voice Over + Caption (SnifoxAI + Gemini)
+# Auto Voice Over + Caption (LiteLLM + Gemini)
 
 Aplikasi untuk otomatisasi:
 - input: `video + judul + deskripsi + affiliate link`
@@ -8,7 +8,7 @@ Aplikasi untuk otomatisasi:
 ## Stack
 - Frontend: React + Vite + TypeScript
 - Backend: Fastify + TypeScript
-- AI: SnifoxAI Gateway untuk script/caption + Gemini native untuk TTS voice-over, dengan fallback otomatis ke model text-only SnifoxAI dan voice Windows lokal saat provider utama gagal
+- AI: LiteLLM gateway untuk script/caption + Gemini native untuk TTS voice-over, dengan fallback otomatis ke model text-only lain di LiteLLM dan voice Windows lokal saat provider utama gagal
 - Media: `ffmpeg-static` + `ffprobe-static` (tanpa install FFmpeg global)
 - Runtime aplikasi: Node.js (Python tidak dipakai untuk runtime aplikasi ini)
 
@@ -29,7 +29,10 @@ npm install
 ```bash
 copy .env.example .env
 ```
-3. Isi `SNIFOX_API_BASE`, `SNIFOX_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
+3. Isi `LITELLM_API_BASE`, `LITELLM_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
+
+Catatan kompatibilitas:
+- Nama env lama `SNIFOX_API_BASE` dan `SNIFOX_API_KEY` masih didukung sebagai fallback, tetapi project ini sekarang didokumentasikan sebagai integrasi LiteLLM.
 
 ## Menjalankan (dev)
 ```bash
@@ -68,8 +71,8 @@ npm run start
 1. Upload source project (tanpa folder cache lokal seperti `node_modules`).
 2. Buat `.env` di server:
 ```env
-SNIFOX_API_BASE=https://core.snifoxai.com/v1
-SNIFOX_API_KEY=snfx-your-api-key
+LITELLM_API_BASE=http://localhost:4000/v1
+LITELLM_API_KEY=sk-your-litellm-key
 GEMINI_TTS_API_KEY=...
 PORT=<port_dari_cpanel>
 WEB_ORIGIN=https://domain-anda
@@ -111,13 +114,13 @@ npm run start
 - Output file di tab `Jobs` tersedia sebagai link langsung (browser-friendly untuk desktop dan Android).
 - Form `Generate` menyediakan kotak `Affiliate Link`.
 - Tab `Jobs` menampilkan caption final siap copy (caption + hashtag + affiliate link job).
-- `scriptModel` harus memakai ID model SnifoxAI lengkap yang benar-benar aktif di gateway. Cek `GET /models`; contoh yang aktif saat ini: `openai/gpt-5-mini`.
+- `scriptModel` harus memakai ID model lengkap yang aktif di gateway LiteLLM. Cek `GET /models`; contoh yang aktif saat ini: `openai/gpt-5-mini`.
 - `ttsModel` tetap model Gemini direct untuk voice-over, contoh `gemini-2.5-flash-preview-tts`.
-- Jika model Google di SnifoxAI sedang gagal di upstream, server otomatis fallback ke model text-only yang masih tersedia agar caption/script tetap jalan.
+- Jika model utama sedang gagal atau unavailable di LiteLLM, server otomatis fallback ke model text-only lain yang masih tersedia agar caption/script tetap jalan.
 - Jika Gemini TTS mengembalikan `403 PERMISSION_DENIED` atau gagal di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.
-- Base URL resmi SnifoxAI: `https://core.snifoxai.com/v1`
-- Daftar model: `https://snifoxai.com/models`
-- Dokumentasi: `https://snifoxai.com/docs`
+- `LITELLM_API_BASE` harus menunjuk ke endpoint OpenAI-compatible LiteLLM, biasanya berakhiran `/v1`.
+- Daftar model aktif bisa dicek lewat endpoint `GET /models` pada gateway LiteLLM Anda.
+- Dokumentasi resmi LiteLLM: `https://docs.litellm.ai/`
 
 ## Testing
 ```bash

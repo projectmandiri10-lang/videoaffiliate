@@ -19,7 +19,7 @@ function normalizeSnifoxBase(input: string): string {
     url = new URL(input);
   } catch {
     throw new Error(
-      "SNIFOX_API_BASE tidak valid. Gunakan URL penuh, contoh: https://core.snifoxai.com/v1"
+      "LITELLM_API_BASE tidak valid. Gunakan URL penuh ke gateway LiteLLM, contoh: http://localhost:4000/v1"
     );
   }
 
@@ -32,9 +32,9 @@ function normalizeSnifoxBase(input: string): string {
 
 export function loadEnv(): AppEnv {
   const snifoxApiBaseRaw =
-    process.env.SNIFOX_API_BASE?.trim() ?? process.env.LITELLM_API_BASE?.trim() ?? "";
+    process.env.LITELLM_API_BASE?.trim() ?? process.env.SNIFOX_API_BASE?.trim() ?? "";
   const snifoxApiKey =
-    process.env.SNIFOX_API_KEY?.trim() ?? process.env.LITELLM_API_KEY?.trim() ?? "";
+    process.env.LITELLM_API_KEY?.trim() ?? process.env.SNIFOX_API_KEY?.trim() ?? "";
   const geminiTtsApiKey =
     process.env.GEMINI_TTS_API_KEY?.trim() ?? process.env.GEMINI_API_KEY?.trim() ?? "";
   const portRaw = process.env.PORT?.trim();
@@ -46,13 +46,13 @@ export function loadEnv(): AppEnv {
 
   if (!snifoxApiBaseRaw) {
     throw new Error(
-      "SNIFOX_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example."
+      "LITELLM_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example. Alias lama SNIFOX_API_BASE masih didukung."
     );
   }
 
   if (!snifoxApiKey) {
     throw new Error(
-      "SNIFOX_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example."
+      "LITELLM_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example. Alias lama SNIFOX_API_KEY masih didukung."
     );
   }
 
