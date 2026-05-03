@@ -33,7 +33,13 @@ interface OpenAiLikeClient {
   };
 }
 
-const TEXT_MODEL_FALLBACKS = ["anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.6"];
+const TEXT_MODEL_FALLBACKS = [
+  "openai/gpt-5-mini",
+  "openai/gpt-5-nano",
+  "minimax/minimax-m2.7",
+  "anthropic/claude-sonnet-4.5",
+  "anthropic/claude-opus-4.6"
+];
 
 export class SnifoxService implements AIService {
   private readonly client: OpenAiLikeClient;
@@ -292,8 +298,15 @@ export class SnifoxService implements AIService {
       });
     } catch (error) {
       if (extractStatusCode(error) === 404) {
+        const message = extractErrorMessage(error);
+        const lowerMessage = message.toLowerCase();
+        if (lowerMessage.includes("currently unavailable")) {
+          throw new Error(
+            `${message}. Model SnifoxAI ini sedang tidak tersedia di gateway. Ganti scriptModel ke model aktif dari endpoint /models, misalnya openai/gpt-5-mini.`
+          );
+        }
         throw new Error(
-          `${extractErrorMessage(error)}. Pastikan model SnifoxAI memakai ID lengkap, contoh: google/gemini-3-flash-preview.`
+          `${message}. Pastikan model SnifoxAI tersedia di endpoint /models dan memakai ID lengkap, misalnya openai/gpt-5-mini.`
         );
       }
       throw error;

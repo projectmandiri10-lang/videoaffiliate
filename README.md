@@ -111,7 +111,7 @@ npm run start
 - Output file di tab `Jobs` tersedia sebagai link langsung (browser-friendly untuk desktop dan Android).
 - Form `Generate` menyediakan kotak `Affiliate Link`.
 - Tab `Jobs` menampilkan caption final siap copy (caption + hashtag + affiliate link job).
-- `scriptModel` harus memakai ID model SnifoxAI lengkap, contoh `google/gemini-3-flash-preview`.
+- `scriptModel` harus memakai ID model SnifoxAI lengkap yang benar-benar aktif di gateway. Cek `GET /models`; contoh yang aktif saat ini: `openai/gpt-5-mini`.
 - `ttsModel` tetap model Gemini direct untuk voice-over, contoh `gemini-2.5-flash-preview-tts`.
 - Jika model Google di SnifoxAI sedang gagal di upstream, server otomatis fallback ke model text-only yang masih tersedia agar caption/script tetap jalan.
 - Jika Gemini TTS mengembalikan `403 PERMISSION_DENIED` atau gagal di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.

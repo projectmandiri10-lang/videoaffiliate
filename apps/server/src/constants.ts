@@ -13,7 +13,7 @@ export const DEFAULT_PORT = 8787;
 export { PLATFORM_CONFIG, PLATFORM_LABELS, PLATFORM_ORDER } from "./platform-config.js";
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  scriptModel: "google/gemini-3-flash-preview",
+  scriptModel: "openai/gpt-5-mini",
   ttsModel: "gemini-2.5-flash-preview-tts",
   language: "id-ID",
   maxVideoSeconds: 60,

@@ -4,6 +4,7 @@ import { FallbackSpeechGenerator } from "./services/fallback-speech-generator.js
 import { JobProcessor } from "./services/job-processor.js";
 import { GeminiTtsService } from "./services/gemini-tts-service.js";
 import { SnifoxService } from "./services/snifox-service.js";
+import { resumeIncompleteJobs } from "./services/startup-resume.js";
 import { WindowsTtsService } from "./services/windows-tts-service.js";
 import { JobsStore } from "./stores/jobs-store.js";
 import { SettingsStore } from "./stores/settings-store.js";
@@ -23,6 +24,7 @@ async function bootstrap(): Promise<void> {
   const windowsTts = new WindowsTtsService(logger);
   const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, geminiTts);
   const processor = new JobProcessor(jobsStore, settingsStore, snifox, speechGenerator, logger);
+  const resumedCount = await resumeIncompleteJobs(jobsStore, processor, logger);
   const app = await buildApp({
     logger,
     webOrigins: env.webOrigins,
@@ -38,6 +40,9 @@ async function bootstrap(): Promise<void> {
   });
 
   logger.info(`Server berjalan di http://localhost:${env.port}`);
+  if (resumedCount > 0) {
+    logger.info({ resumedCount }, "Job yang belum selesai sudah dimasukkan lagi ke antrean.");
+  }
 }
 
 bootstrap().catch((error) => {

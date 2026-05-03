@@ -156,7 +156,7 @@ describe("SnifoxService", () => {
       ]
     });
     expect(chatCreate.mock.calls[2]?.[0]).toMatchObject({
-      model: "anthropic/claude-sonnet-4.5",
+      model: "openai/gpt-5-mini",
       messages: [{ role: "user", content: "Analisis video inline ini" }]
     });
   });
@@ -177,7 +177,7 @@ describe("SnifoxService", () => {
           inlineDataBase64: Buffer.from("inline-video").toString("base64")
         }
       })
-    ).rejects.toThrow(/google\/gemini-3-flash-preview/i);
+    ).rejects.toThrow(/openai\/gpt-5-mini|endpoint \/models/i);
   });
 
   it("requests json_object response format for social metadata", async () => {
@@ -239,7 +239,7 @@ describe("SnifoxService", () => {
       hashtags: ["#fallback"]
     });
     expect(chatCreate.mock.calls[1]?.[0]).toMatchObject({
-      model: "anthropic/claude-sonnet-4.5"
+      model: "openai/gpt-5-mini"
     });
   });
 
