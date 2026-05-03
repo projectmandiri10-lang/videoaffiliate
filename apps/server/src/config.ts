@@ -6,14 +6,14 @@ import { DEFAULT_PORT } from "./constants.js";
 dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 
 export interface AppEnv {
-  snifoxApiBase: string;
-  snifoxApiKey: string;
+  llmApiBase: string;
+  llmApiKey: string;
   geminiTtsApiKey: string;
   port: number;
   webOrigins: string[];
 }
 
-function normalizeSnifoxBase(input: string): string {
+function normalizeLiteLlmBase(input: string): string {
   let url: URL;
   try {
     url = new URL(input);
@@ -31,9 +31,9 @@ function normalizeSnifoxBase(input: string): string {
 }
 
 export function loadEnv(): AppEnv {
-  const snifoxApiBaseRaw =
+  const llmApiBaseRaw =
     process.env.LITELLM_API_BASE?.trim() ?? process.env.SNIFOX_API_BASE?.trim() ?? "";
-  const snifoxApiKey =
+  const llmApiKey =
     process.env.LITELLM_API_KEY?.trim() ?? process.env.SNIFOX_API_KEY?.trim() ?? "";
   const geminiTtsApiKey =
     process.env.GEMINI_TTS_API_KEY?.trim() ?? process.env.GEMINI_API_KEY?.trim() ?? "";
@@ -44,13 +44,13 @@ export function loadEnv(): AppEnv {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
-  if (!snifoxApiBaseRaw) {
+  if (!llmApiBaseRaw) {
     throw new Error(
       "LITELLM_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example. Alias lama SNIFOX_API_BASE masih didukung."
     );
   }
 
-  if (!snifoxApiKey) {
+  if (!llmApiKey) {
     throw new Error(
       "LITELLM_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example. Alias lama SNIFOX_API_KEY masih didukung."
     );
@@ -73,8 +73,8 @@ export function loadEnv(): AppEnv {
   }
 
   return {
-    snifoxApiBase: normalizeSnifoxBase(snifoxApiBaseRaw),
-    snifoxApiKey,
+    llmApiBase: normalizeLiteLlmBase(llmApiBaseRaw),
+    llmApiKey,
     geminiTtsApiKey,
     port,
     webOrigins

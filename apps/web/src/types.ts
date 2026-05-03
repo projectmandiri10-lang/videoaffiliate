@@ -38,6 +38,7 @@ export interface PlatformRun {
   platformId: PlatformId;
   status: PlatformStatus;
   errorMessage?: string;
+  retryAfter?: string;
   scriptPath?: string;
   srtPath?: string;
   mp4Path?: string;

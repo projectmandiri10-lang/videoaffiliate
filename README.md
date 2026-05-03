@@ -32,7 +32,7 @@ copy .env.example .env
 3. Isi `LITELLM_API_BASE`, `LITELLM_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
 
 Catatan kompatibilitas:
-- Nama env lama `SNIFOX_API_BASE` dan `SNIFOX_API_KEY` masih didukung sebagai fallback, tetapi project ini sekarang didokumentasikan sebagai integrasi LiteLLM.
+- Nama env lama `SNIFOX_API_BASE` dan `SNIFOX_API_KEY` masih didukung sebagai fallback agar migrasi dari setup lama tetap aman, tetapi project ini sekarang didokumentasikan sebagai integrasi LiteLLM.
 
 ## Menjalankan (dev)
 ```bash

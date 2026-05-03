@@ -41,7 +41,7 @@ const TEXT_MODEL_FALLBACKS = [
   "anthropic/claude-opus-4.6"
 ];
 
-export class SnifoxService implements AIService {
+export class LiteLlmService implements AIService {
   private readonly client: OpenAiLikeClient;
 
   public constructor(
@@ -70,7 +70,7 @@ export class SnifoxService implements AIService {
           this.client.files.create({
             file: createReadStream(filePath),
             purpose: "user_data",
-            // SnifoxAI gateway accepts provider-routing metadata on /v1/files.
+            // LiteLLM gateway accepts provider-routing metadata on /v1/files.
             target_model_names: targetModel
           }),
         {
@@ -83,7 +83,7 @@ export class SnifoxService implements AIService {
       );
 
       if (!uploaded?.id) {
-        throw new Error("Upload video ke SnifoxAI gagal: file_id tidak tersedia.");
+        throw new Error("Upload video ke LiteLLM gagal: file_id tidak tersedia.");
       }
 
       return {
@@ -98,7 +98,7 @@ export class SnifoxService implements AIService {
 
       this.logger.warn(
         { err: error, filePath },
-        "SnifoxAI tidak menyediakan /v1/files, lanjutkan dengan fallback script text-only."
+        "LiteLLM tidak menyediakan /v1/files, lanjutkan dengan fallback script text-only."
       );
 
       return {
@@ -126,7 +126,7 @@ export class SnifoxService implements AIService {
 
           this.logger.warn(
             { model: input.model },
-            "Script multimodal kosong dari SnifoxAI, mencoba prompt berikutnya."
+            "Script multimodal kosong dari LiteLLM, mencoba prompt berikutnya."
           );
         } catch (error) {
           lastError = error;
@@ -136,7 +136,7 @@ export class SnifoxService implements AIService {
 
           this.logger.warn(
             { err: error, model: input.model },
-            "Script multimodal SnifoxAI gagal, fallback ke model text-only."
+            "Script multimodal LiteLLM gagal, fallback ke model text-only."
           );
           break;
         }
@@ -144,7 +144,7 @@ export class SnifoxService implements AIService {
     } else {
       this.logger.warn(
         { model: input.model },
-        "Video tidak bisa dipakai di SnifoxAI, fallback ke generate script text-only."
+        "Video tidak bisa dipakai di LiteLLM, fallback ke generate script text-only."
       );
     }
 
@@ -177,7 +177,7 @@ export class SnifoxService implements AIService {
         if (model !== input.model) {
           this.logger.warn(
             { requestedModel: input.model, fallbackModel: model },
-            "Caption/hashtags dipindah ke model fallback SnifoxAI."
+            "Caption/hashtags dipindah ke model fallback LiteLLM."
           );
         }
 
@@ -195,7 +195,7 @@ export class SnifoxService implements AIService {
       }
     }
 
-    throw lastError ?? new Error("SnifoxAI gagal membuat caption dan hashtags.");
+    throw lastError ?? new Error("LiteLLM gagal membuat caption dan hashtags.");
   }
 
   private async generateScriptTextOnly(
@@ -214,7 +214,7 @@ export class SnifoxService implements AIService {
           if (!script) {
             this.logger.warn(
               { model },
-              "Script text-only kosong dari SnifoxAI, mencoba prompt atau model berikutnya."
+              "Script text-only kosong dari LiteLLM, mencoba prompt atau model berikutnya."
             );
             continue;
           }
@@ -222,7 +222,7 @@ export class SnifoxService implements AIService {
           if (model !== preferredModel) {
             this.logger.warn(
               { requestedModel: preferredModel, fallbackModel: model },
-              "Script dipindah ke model fallback SnifoxAI."
+              "Script dipindah ke model fallback LiteLLM."
             );
           }
 
@@ -241,7 +241,7 @@ export class SnifoxService implements AIService {
       }
     }
 
-    throw lastError ?? new Error("SnifoxAI mengembalikan script kosong.");
+    throw lastError ?? new Error("LiteLLM mengembalikan script kosong.");
   }
 
   private buildPromptVariants(prompt: string): string[] {
@@ -275,7 +275,7 @@ export class SnifoxService implements AIService {
               ...(file.fileId ? { file_id: file.fileId } : {}),
               ...(file.inlineDataBase64 ? { file_data: file.inlineDataBase64 } : {}),
               filename: file.filename,
-              // SnifoxAI accepts Gemini format hints for uploaded files.
+              // LiteLLM accepts Gemini format hints for uploaded files.
               format: file.mimeType
             }
           }
@@ -302,11 +302,11 @@ export class SnifoxService implements AIService {
         const lowerMessage = message.toLowerCase();
         if (lowerMessage.includes("currently unavailable")) {
           throw new Error(
-            `${message}. Model SnifoxAI ini sedang tidak tersedia di gateway. Ganti scriptModel ke model aktif dari endpoint /models, misalnya openai/gpt-5-mini.`
+            `${message}. Model LiteLLM ini sedang tidak tersedia di gateway. Ganti scriptModel ke model aktif dari endpoint /models, misalnya openai/gpt-5-mini.`
           );
         }
         throw new Error(
-          `${message}. Pastikan model SnifoxAI tersedia di endpoint /models dan memakai ID lengkap, misalnya openai/gpt-5-mini.`
+          `${message}. Pastikan model LiteLLM tersedia di endpoint /models dan memakai ID lengkap, misalnya openai/gpt-5-mini.`
         );
       }
       throw error;

@@ -32,12 +32,12 @@ describe("model output parser", () => {
       choices: [
         {
           message: {
-            content: "Naskah dari SnifoxAI."
+            content: "Naskah dari LiteLLM."
           }
         }
       ]
     };
-    expect(extractScriptText(response)).toBe("Naskah dari SnifoxAI.");
+    expect(extractScriptText(response)).toBe("Naskah dari LiteLLM.");
   });
 
   it("extracts base64 audio", () => {

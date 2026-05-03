@@ -3,7 +3,7 @@ import { loadEnv } from "./config.js";
 import { FallbackSpeechGenerator } from "./services/fallback-speech-generator.js";
 import { JobProcessor } from "./services/job-processor.js";
 import { GeminiTtsService } from "./services/gemini-tts-service.js";
-import { SnifoxService } from "./services/snifox-service.js";
+import { LiteLlmService } from "./services/litellm-service.js";
 import { resumeIncompleteJobs } from "./services/startup-resume.js";
 import { WindowsTtsService } from "./services/windows-tts-service.js";
 import { JobsStore } from "./stores/jobs-store.js";
@@ -19,11 +19,17 @@ async function bootstrap(): Promise<void> {
   const jobsStore = new JobsStore();
   await jobsStore.markRunningAsInterrupted();
 
-  const snifox = new SnifoxService(env.snifoxApiBase, env.snifoxApiKey, logger);
+  const llmService = new LiteLlmService(env.llmApiBase, env.llmApiKey, logger);
   const geminiTts = new GeminiTtsService(env.geminiTtsApiKey, logger);
   const windowsTts = new WindowsTtsService(logger);
   const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, geminiTts);
-  const processor = new JobProcessor(jobsStore, settingsStore, snifox, speechGenerator, logger);
+  const processor = new JobProcessor(
+    jobsStore,
+    settingsStore,
+    llmService,
+    speechGenerator,
+    logger
+  );
   const resumedCount = await resumeIncompleteJobs(jobsStore, processor, logger);
   const app = await buildApp({
     logger,

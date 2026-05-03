@@ -40,12 +40,19 @@ export interface PlatformRun {
   platformId: PlatformId;
   status: PlatformStatus;
   errorMessage?: string;
+  retryAfter?: string;
   scriptPath?: string;
   srtPath?: string;
   mp4Path?: string;
   captionPath?: string;
   captionText?: string;
   hashtags?: string[];
+  scriptText?: string;
+  selectedCtaText?: string;
+  selectedCtaIndex?: number;
+  scriptCacheKey?: string;
+  captionCacheKey?: string;
+  ttsCacheKey?: string;
   artifactPaths: string[];
   updatedAt: string;
 }

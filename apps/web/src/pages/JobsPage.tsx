@@ -59,6 +59,28 @@ function isJobDeletable(job: JobRecord): boolean {
   return job.overallStatus !== "running";
 }
 
+function getRetryCooldownMs(retryAfter?: string, nowMs = Date.now()): number {
+  if (!retryAfter) {
+    return 0;
+  }
+  const retryAtMs = Date.parse(retryAfter);
+  if (!Number.isFinite(retryAtMs)) {
+    return 0;
+  }
+  return Math.max(0, retryAtMs - nowMs);
+}
+
+function formatRetryCooldown(ms: number): string {
+  const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 function getJobProgress(job: JobRecord): {
   percent: number;
   summary: string;
@@ -116,6 +138,7 @@ export function JobsPage({
   const [message, setMessage] = useState("");
   const [copyInfo, setCopyInfo] = useState("");
   const [createFileInputKey, setCreateFileInputKey] = useState(0);
+  const [retryClockMs, setRetryClockMs] = useState(() => Date.now());
   const [createForm, setCreateForm] = useState<CreateFormState>(EMPTY_CREATE_FORM);
   const [editForm, setEditForm] = useState<EditFormState>(EMPTY_EDIT_FORM);
   const selectedJobIdRef = useRef("");
@@ -192,6 +215,13 @@ export function JobsPage({
     }, 5000);
     return () => clearInterval(timer);
   }, [refreshJobs]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRetryClockMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (panelMode === "edit") {
@@ -735,6 +765,8 @@ export function JobsPage({
                   <tbody>
                     {selected.platforms.map((platform) => {
                       const outputLinks = getOutputLinks(platform);
+                      const retryCooldownMs = getRetryCooldownMs(platform.retryAfter, retryClockMs);
+                      const retryDisabled = retryCooldownMs > 0;
                       return (
                         <tr key={platform.platformId}>
                           <td>{PLATFORM_LABEL[platform.platformId]}</td>
@@ -794,12 +826,20 @@ export function JobsPage({
                           </td>
                           <td>
                             {(platform.status === "failed" || platform.status === "interrupted") && (
-                              <button
-                                type="button"
-                                onClick={() => void onRetry(platform.platformId)}
-                              >
-                                Retry
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void onRetry(platform.platformId)}
+                                  disabled={retryDisabled}
+                                >
+                                  {retryDisabled
+                                    ? `Retry (${formatRetryCooldown(retryCooldownMs)})`
+                                    : "Retry"}
+                                </button>
+                                {retryDisabled && (
+                                  <div className="small">Retry tersedia lagi sebentar lagi.</div>
+                                )}
+                              </>
                             )}
                           </td>
                         </tr>

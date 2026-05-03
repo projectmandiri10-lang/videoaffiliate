@@ -2,16 +2,16 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SnifoxService } from "../src/services/snifox-service.js";
+import { LiteLlmService } from "../src/services/litellm-service.js";
 
-describe("SnifoxService", () => {
+describe("LiteLlmService", () => {
   const logger = pino({ level: "silent" });
   const filesCreate = vi.fn();
   const chatCreate = vi.fn();
-  const tempDir = path.join(process.env.APP_STORAGE_ROOT || process.cwd(), "snifox-service-test");
+  const tempDir = path.join(process.env.APP_STORAGE_ROOT || process.cwd(), "litellm-service-test");
   const tempVideoPath = path.join(tempDir, "source.mp4");
 
-  const service = new SnifoxService("https://core.snifoxai.com/v1", "snfx-test", logger, {
+  const service = new LiteLlmService("https://core.snifoxai.com/v1", "snfx-test", logger, {
     files: {
       create: filesCreate
     },
@@ -31,7 +31,7 @@ describe("SnifoxService", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("uploads video with SnifoxAI target model metadata", async () => {
+  it("uploads video with LiteLLM target model metadata", async () => {
     await mkdir(tempDir, { recursive: true });
     await writeFile(tempVideoPath, "fake-video", "utf8");
     filesCreate.mockResolvedValue({
@@ -82,7 +82,7 @@ describe("SnifoxService", () => {
       choices: [
         {
           message: {
-            content: "Naskah SnifoxAI final."
+            content: "Naskah LiteLLM final."
           }
         }
       ]
@@ -98,7 +98,7 @@ describe("SnifoxService", () => {
       }
     });
 
-    expect(script).toBe("Naskah SnifoxAI final.");
+    expect(script).toBe("Naskah LiteLLM final.");
     expect(chatCreate).toHaveBeenCalledTimes(1);
     expect(chatCreate.mock.calls[0]?.[0]).toMatchObject({
       model: "google/gemini-3-flash-preview"
@@ -110,7 +110,7 @@ describe("SnifoxService", () => {
     });
   });
 
-  it("falls back to a text-only model when SnifoxAI cannot use the uploaded video", async () => {
+  it("falls back to a text-only model when LiteLLM cannot use the uploaded video", async () => {
     chatCreate
       .mockRejectedValueOnce({
         status: 404,
@@ -161,7 +161,7 @@ describe("SnifoxService", () => {
     });
   });
 
-  it("adds a helpful message when SnifoxAI cannot find a model", async () => {
+  it("adds a helpful message when LiteLLM cannot find a model", async () => {
     chatCreate.mockRejectedValue({
       status: 404,
       message: "404 status code (no body)"

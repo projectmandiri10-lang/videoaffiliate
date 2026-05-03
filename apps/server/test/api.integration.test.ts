@@ -294,6 +294,51 @@ describe("api integration", () => {
     expect(enqueueCalls[enqueueCalls.length - 1]?.platformIds).toEqual(["tiktok"]);
   });
 
+  it("blocks retry while platform cooldown is still active", async () => {
+    const form = buildCreateForm({
+      title: "Judul Cooldown",
+      description: "Deskripsi Cooldown",
+      affiliateLink: "https://contoh-affiliate.test/cooldown"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "failed",
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
+          ? {
+              ...platform,
+              status: "failed",
+              errorMessage: "mock fail",
+              retryAfter: new Date(Date.now() + 30_000).toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          : platform
+      )
+    }));
+
+    const retryResponse = await app.inject({
+      method: "POST",
+      url: `/api/jobs/${payload.jobId}/retry`,
+      payload: {
+        platformId: "tiktok"
+      }
+    });
+
+    expect(retryResponse.statusCode).toBe(429);
+    expect(retryResponse.json()).toMatchObject({
+      message: "Retry masih cooldown."
+    });
+    expect(enqueueCalls).toHaveLength(1);
+  });
+
   it("updates editable job metadata", async () => {
     const form = buildCreateForm({
       title: "Judul Awal",

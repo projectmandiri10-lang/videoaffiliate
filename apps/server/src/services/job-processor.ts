@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyBaseLogger } from "fastify";
 import type {
@@ -7,12 +8,13 @@ import type {
   JobRecord,
   PlatformId,
   PlatformRun,
+  SocialMetadata,
   SpeechGenerator
 } from "../types.js";
 import { PLATFORM_LABELS } from "../platform-config.js";
 import { JobsStore } from "../stores/jobs-store.js";
 import { SettingsStore } from "../stores/settings-store.js";
-import { buildScriptPrompt } from "./prompt-builder.js";
+import { buildReelsMetadataPrompt, buildScriptPrompt } from "./prompt-builder.js";
 import { OUTPUTS_DIR, outputUrlToAbsolutePath } from "../utils/paths.js";
 import { combineVideoWithVoiceOver, writeWav24kMono } from "../utils/audio.js";
 import { formatCtaAsSentence } from "../utils/cta.js";
@@ -21,6 +23,7 @@ import { resolveVersionedBaseName } from "../utils/filename.js";
 import {
   buildRateLimitErrorMessage,
   extractErrorMessage,
+  getRetryDelayMs,
   isRateLimitError
 } from "../utils/llm-error.js";
 
@@ -28,6 +31,15 @@ interface QueueItem {
   jobId: string;
   platformIds?: PlatformId[];
 }
+
+interface SelectedCtaState {
+  ctaMode: AppSettings["ctaMode"];
+  ctaText: string;
+  ctaIndex: number;
+}
+
+const DEFAULT_RETRY_COOLDOWN_MS = 10_000;
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 15_000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -63,6 +75,45 @@ function fallbackHashtags(title: string, platformId: PlatformId): string[] {
   };
 
   return [...baseByPlatform[platformId], ...words];
+}
+
+function hashValue(input: unknown): string {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+}
+
+function buildScriptCacheKey(model: string, prompt: string): string {
+  return hashValue({
+    stage: "script",
+    model,
+    prompt
+  });
+}
+
+function buildCaptionCacheKey(model: string, prompt: string): string {
+  return hashValue({
+    stage: "caption",
+    model,
+    prompt
+  });
+}
+
+function buildTtsCacheKey(input: {
+  model: string;
+  text: string;
+  voiceName: string;
+  speechRate: number;
+}): string {
+  return hashValue({
+    stage: "tts",
+    ...input
+  });
+}
+
+function buildRetryAfter(error: unknown): string {
+  const cooldownMs = isRateLimitError(error)
+    ? getRetryDelayMs(error, DEFAULT_RATE_LIMIT_COOLDOWN_MS)
+    : DEFAULT_RETRY_COOLDOWN_MS;
+  return new Date(Date.now() + cooldownMs).toISOString();
 }
 
 function toOutputUrl(platformId: PlatformId, filename: string): string {
@@ -174,17 +225,33 @@ export class JobProcessor implements IJobProcessor {
       updatedAt: nowIso()
     }));
 
+    const requiresUploadedVideo = selectedPlatformIds.some((platformId) => {
+      const platformSettings = findPlatformSettings(settings, platformId);
+      if (!platformSettings?.enabled) {
+        return false;
+      }
+      const previousPlatform = job.platforms.find((platform) => platform.platformId === platformId);
+      return this.needsFreshScript(job, settings, platformId, previousPlatform);
+    });
+
     let uploadedVideo;
-    try {
-      uploadedVideo = await this.aiService.uploadVideo(
-        job.videoPath,
-        job.videoMimeType,
-        settings.scriptModel
-      );
-    } catch (error) {
-      const message = this.toErrorMessage(error);
-      await this.markPlatformsFailed(item.jobId, selectedPlatformIds, message);
-      return;
+    if (requiresUploadedVideo) {
+      try {
+        uploadedVideo = await this.aiService.uploadVideo(
+          job.videoPath,
+          job.videoMimeType,
+          settings.scriptModel
+        );
+      } catch (error) {
+        const message = this.toErrorMessage(error);
+        await this.markPlatformsFailed(
+          item.jobId,
+          selectedPlatformIds,
+          message,
+          buildRetryAfter(error)
+        );
+        return;
+      }
     }
 
     for (const platformId of selectedPlatformIds) {
@@ -212,7 +279,12 @@ export class JobProcessor implements IJobProcessor {
       const attemptOutputPaths: string[] = [];
       const previousPlatform = job.platforms.find((platform) => platform.platformId === platformId);
       try {
-        const selectedCta = await this.settingsStore.pickCta(platformId);
+        const selectedCta = await this.resolveSelectedCta(
+          item.jobId,
+          platformId,
+          previousPlatform,
+          settings
+        );
         const scriptPrompt = buildScriptPrompt({
           settings,
           platformId,
@@ -221,11 +293,27 @@ export class JobProcessor implements IJobProcessor {
           videoDurationSec: job.videoDurationSec,
           ctaText: selectedCta.ctaText
         });
-        const scriptText = await this.aiService.generateScript({
-          model: settings.scriptModel,
-          prompt: scriptPrompt,
-          video: uploadedVideo
-        });
+        const scriptCacheKey = buildScriptCacheKey(settings.scriptModel, scriptPrompt);
+        const cachedScriptText =
+          previousPlatform?.scriptCacheKey === scriptCacheKey ? previousPlatform.scriptText : undefined;
+        const scriptText =
+          cachedScriptText ||
+          (await this.aiService.generateScript({
+            model: settings.scriptModel,
+            prompt: scriptPrompt,
+            video:
+              uploadedVideo ?? {
+                filename: path.basename(job.videoPath),
+                mimeType: job.videoMimeType
+              }
+          }));
+
+        if (!cachedScriptText) {
+          await this.patchPlatform(item.jobId, platformId, {
+            scriptText,
+            scriptCacheKey
+          });
+        }
 
         const outputDir = path.join(OUTPUTS_DIR, platformId);
         await mkdir(outputDir, { recursive: true });
@@ -246,29 +334,56 @@ export class JobProcessor implements IJobProcessor {
           caption: fallbackCaption(job.title, job.description, selectedCta.ctaText),
           hashtags: fallbackHashtags(job.title, platformId)
         };
-        const socialMetadata = await (async () => {
-          try {
-            const candidate = await this.aiService.generateSocialMetadata({
-              model: settings.scriptModel,
-              title: job.title,
-              description: job.description,
-              platformId,
-              scriptText,
-              ctaText: selectedCta.ctaText
-            });
-            return ensureSocialMetadata(
-              candidate,
-              fallbackSocial.caption,
-              fallbackSocial.hashtags
-            );
-          } catch (error) {
-            this.logger.warn(
-              { err: error, jobId: item.jobId, platformId },
-              "Generate caption/hashtags gagal, pakai fallback."
-            );
-            return fallbackSocial;
-          }
-        })();
+        const captionPrompt = buildReelsMetadataPrompt({
+          title: job.title,
+          description: job.description,
+          platformId,
+          scriptText,
+          ctaText: selectedCta.ctaText
+        });
+        const captionCacheKey = buildCaptionCacheKey(settings.scriptModel, captionPrompt);
+        const cachedSocialMetadata =
+          previousPlatform?.captionCacheKey === captionCacheKey &&
+          previousPlatform.captionText &&
+          previousPlatform.hashtags?.length
+            ? {
+                caption: previousPlatform.captionText,
+                hashtags: previousPlatform.hashtags
+              }
+            : undefined;
+        const socialMetadata =
+          cachedSocialMetadata ||
+          (await (async (): Promise<SocialMetadata> => {
+            try {
+              const candidate = await this.aiService.generateSocialMetadata({
+                model: settings.scriptModel,
+                title: job.title,
+                description: job.description,
+                platformId,
+                scriptText,
+                ctaText: selectedCta.ctaText
+              });
+              return ensureSocialMetadata(
+                candidate,
+                fallbackSocial.caption,
+                fallbackSocial.hashtags
+              );
+            } catch (error) {
+              this.logger.warn(
+                { err: error, jobId: item.jobId, platformId },
+                "Generate caption/hashtags gagal, pakai fallback."
+              );
+              return fallbackSocial;
+            }
+          })());
+
+        if (!cachedSocialMetadata) {
+          await this.patchPlatform(item.jobId, platformId, {
+            captionText: socialMetadata.caption,
+            hashtags: socialMetadata.hashtags,
+            captionCacheKey
+          });
+        }
         const captionFileParts = [
           socialMetadata.caption,
           socialMetadata.hashtags.join(" "),
@@ -277,18 +392,34 @@ export class JobProcessor implements IJobProcessor {
         await writeFile(captionPath, `${captionFileParts.join("\n\n")}\n`, "utf8");
 
         const tempWavPath = path.join(path.dirname(job.videoPath), `${platformId}-tts.wav`);
-        const audio = await this.speechGenerator.generateSpeech({
+        const ttsCacheKey = buildTtsCacheKey({
           model: settings.ttsModel,
           text: scriptText,
           voiceName: platformSettings.voiceName,
           speechRate: platformSettings.speechRate
         });
-        await writeWav24kMono(
-          audio.data,
-          audio.mimeType,
-          tempWavPath,
-          platformSettings.speechRate
-        );
+        const canReuseAudio =
+          previousPlatform?.ttsCacheKey === ttsCacheKey &&
+          (await this.fileExists(tempWavPath));
+
+        if (!canReuseAudio) {
+          const audio = await this.speechGenerator.generateSpeech({
+            model: settings.ttsModel,
+            text: scriptText,
+            voiceName: platformSettings.voiceName,
+            speechRate: platformSettings.speechRate
+          });
+          await writeWav24kMono(
+            audio.data,
+            audio.mimeType,
+            tempWavPath,
+            platformSettings.speechRate
+          );
+          await this.patchPlatform(item.jobId, platformId, {
+            ttsCacheKey
+          });
+        }
+
         await combineVideoWithVoiceOver(
           job.videoPath,
           tempWavPath,
@@ -326,6 +457,7 @@ export class JobProcessor implements IJobProcessor {
                   ...platform,
                   status: "done",
                   errorMessage: undefined,
+                  retryAfter: undefined,
                   scriptPath: undefined,
                   srtPath: undefined,
                   mp4Path: latestUrls[0],
@@ -346,7 +478,13 @@ export class JobProcessor implements IJobProcessor {
         await Promise.all(
           attemptOutputPaths.map((outputPath) => rm(outputPath, { recursive: false, force: true }))
         );
-        await this.updatePlatform(item.jobId, platformId, "failed", this.toErrorMessage(error));
+        await this.updatePlatform(
+          item.jobId,
+          platformId,
+          "failed",
+          this.toErrorMessage(error),
+          buildRetryAfter(error)
+        );
         this.logger.error(
           { err: error, jobId: item.jobId, platformId },
           "Platform processing gagal."
@@ -364,7 +502,8 @@ export class JobProcessor implements IJobProcessor {
   private async markPlatformsFailed(
     jobId: string,
     platformIds: PlatformId[],
-    message: string
+    message: string,
+    retryAfter?: string
   ): Promise<void> {
     await this.jobsStore.update(jobId, (current) => {
       const nextPlatforms = current.platforms.map<PlatformRun>((platform) =>
@@ -373,6 +512,7 @@ export class JobProcessor implements IJobProcessor {
               ...platform,
               status: "failed",
               errorMessage: message,
+              retryAfter,
               updatedAt: nowIso()
             }
           : platform
@@ -390,7 +530,8 @@ export class JobProcessor implements IJobProcessor {
     jobId: string,
     platformId: PlatformId,
     status: JobRecord["platforms"][number]["status"],
-    errorMessage?: string
+    errorMessage?: string,
+    retryAfter?: string
   ): Promise<void> {
     await this.jobsStore.update(jobId, (current) => {
       const nextPlatforms = current.platforms.map<PlatformRun>((platform) =>
@@ -399,6 +540,7 @@ export class JobProcessor implements IJobProcessor {
               ...platform,
               status,
               errorMessage,
+              retryAfter: status === "failed" || status === "interrupted" ? retryAfter : undefined,
               updatedAt: nowIso()
             }
           : platform
@@ -414,8 +556,80 @@ export class JobProcessor implements IJobProcessor {
 
   private toErrorMessage(error: unknown): string {
     if (isRateLimitError(error)) {
-      return `${buildRateLimitErrorMessage(error)} Cek quota/key SnifoxAI Anda atau tunggu reset limit.`;
+      return `${buildRateLimitErrorMessage(error)} Cek quota/key LiteLLM Anda atau tunggu reset limit.`;
     }
     return extractErrorMessage(error);
+  }
+
+  private async patchPlatform(
+    jobId: string,
+    platformId: PlatformId,
+    patch: Partial<PlatformRun>
+  ): Promise<void> {
+    await this.jobsStore.update(jobId, (current) => ({
+      ...current,
+      updatedAt: nowIso(),
+      platforms: current.platforms.map<PlatformRun>((platform) =>
+        platform.platformId === platformId
+          ? {
+              ...platform,
+              ...patch,
+              updatedAt: nowIso()
+            }
+          : platform
+      )
+    }));
+  }
+
+  private async resolveSelectedCta(
+    jobId: string,
+    platformId: PlatformId,
+    previousPlatform: PlatformRun | undefined,
+    settings: AppSettings
+  ): Promise<SelectedCtaState> {
+    if (previousPlatform?.selectedCtaText?.trim()) {
+      return {
+        ctaMode: settings.ctaMode,
+        ctaText: previousPlatform.selectedCtaText,
+        ctaIndex: previousPlatform.selectedCtaIndex ?? 0
+      };
+    }
+
+    const selected = await this.settingsStore.pickCta(platformId);
+    await this.patchPlatform(jobId, platformId, {
+      selectedCtaText: selected.ctaText,
+      selectedCtaIndex: selected.ctaIndex
+    });
+    return selected;
+  }
+
+  private needsFreshScript(
+    job: JobRecord,
+    settings: AppSettings,
+    platformId: PlatformId,
+    platform: PlatformRun | undefined
+  ): boolean {
+    if (!platform?.scriptText || !platform.selectedCtaText || !platform.scriptCacheKey) {
+      return true;
+    }
+
+    const prompt = buildScriptPrompt({
+      settings,
+      platformId,
+      title: job.title,
+      description: job.description,
+      videoDurationSec: job.videoDurationSec,
+      ctaText: platform.selectedCtaText
+    });
+    return platform.scriptCacheKey !== buildScriptCacheKey(settings.scriptModel, prompt);
+  }
+
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

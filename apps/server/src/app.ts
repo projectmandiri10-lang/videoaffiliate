@@ -111,6 +111,51 @@ function resolvePlatformFolderPath(
   return absoluteOutput ? path.dirname(absoluteOutput) : path.join(OUTPUTS_DIR, platformId);
 }
 
+function getRetryCooldownRemainingMs(retryAfter?: string): number {
+  if (!retryAfter) {
+    return 0;
+  }
+  const retryAtMs = Date.parse(retryAfter);
+  if (!Number.isFinite(retryAtMs)) {
+    return 0;
+  }
+  return Math.max(0, retryAtMs - Date.now());
+}
+
+function formatRetryCooldown(ms: number): string {
+  const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds} detik`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes} menit` : `${minutes} menit ${seconds} detik`;
+}
+
+function clearRetryablePlatformState(
+  platform: JobRecord["platforms"][number]
+): JobRecord["platforms"][number] {
+  return {
+    ...platform,
+    retryAfter: undefined,
+    scriptPath: undefined,
+    srtPath: undefined,
+    mp4Path: undefined,
+    captionPath: undefined,
+    captionText: undefined,
+    hashtags: undefined,
+    scriptText: undefined,
+    selectedCtaText: undefined,
+    selectedCtaIndex: undefined,
+    scriptCacheKey: undefined,
+    captionCacheKey: undefined,
+    ttsCacheKey: undefined,
+    artifactPaths: [],
+    updatedAt: nowIso()
+  };
+}
+
 async function maybeRegisterWebStatic(app: FastifyInstance): Promise<void> {
   try {
     await access(WEB_DIST_DIR);
@@ -314,7 +359,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         title: payload.title,
         description: payload.description,
         affiliateLink: payload.affiliateLink,
-        updatedAt: nowIso()
+        updatedAt: nowIso(),
+        platforms: current.platforms.map((platform) =>
+          platform.status === "done" ? platform : clearRetryablePlatformState(platform)
+        )
       }));
 
       if (!updated) {
@@ -381,6 +429,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         message: "Retry hanya untuk platform dengan status failed/interrupted."
       });
     }
+    const remainingCooldownMs = getRetryCooldownRemainingMs(platform.retryAfter);
+    if (remainingCooldownMs > 0) {
+      return reply
+        .code(429)
+        .header("Retry-After", String(Math.ceil(remainingCooldownMs / 1000)))
+        .send({
+          message: "Retry masih cooldown.",
+          error: `Coba lagi dalam ${formatRetryCooldown(remainingCooldownMs)}.`
+        });
+    }
 
     await options.jobsStore.update(params.jobId, (current) => ({
       ...current,
@@ -392,6 +450,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
               ...item,
               status: "pending",
               errorMessage: undefined,
+              retryAfter: undefined,
               updatedAt: nowIso()
             }
           : item

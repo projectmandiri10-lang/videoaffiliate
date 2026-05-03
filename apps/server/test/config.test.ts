@@ -75,7 +75,7 @@ describe("loadEnv", () => {
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
     const env = loadEnv();
-    expect(env.snifoxApiBase).toBe("http://localhost:4000/v1");
+    expect(env.llmApiBase).toBe("http://localhost:4000/v1");
   });
 
   it("keeps base URL with existing /v1 path", () => {
@@ -86,7 +86,7 @@ describe("loadEnv", () => {
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
     const env = loadEnv();
-    expect(env.snifoxApiBase).toBe("http://localhost:4000/v1");
+    expect(env.llmApiBase).toBe("http://localhost:4000/v1");
   });
 
   it("throws when LiteLLM env is missing", () => {
@@ -128,7 +128,7 @@ describe("loadEnv", () => {
     expect(env.geminiTtsApiKey).toBe("gemini-legacy-test");
   });
 
-  it("still supports legacy Snifox env names as fallback", () => {
+  it("still supports legacy SNIFOX env names as fallback", () => {
     delete process.env.LITELLM_API_BASE;
     delete process.env.LITELLM_API_KEY;
     process.env.SNIFOX_API_BASE = "https://core.snifoxai.com";
@@ -138,7 +138,7 @@ describe("loadEnv", () => {
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
     const env = loadEnv();
-    expect(env.snifoxApiBase).toBe("https://core.snifoxai.com/v1");
-    expect(env.snifoxApiKey).toBe("snfx-test");
+    expect(env.llmApiBase).toBe("https://core.snifoxai.com/v1");
+    expect(env.llmApiKey).toBe("snfx-test");
   });
 });

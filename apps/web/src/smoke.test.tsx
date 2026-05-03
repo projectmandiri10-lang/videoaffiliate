@@ -157,6 +157,7 @@ describe("web smoke", () => {
             status: "failed",
             updatedAt: "2026-04-01T00:00:00.000Z",
             errorMessage: "fetch failed",
+            retryAfter: "2099-04-01T00:00:00.000Z",
             artifactPaths: []
           },
           {
@@ -190,5 +191,8 @@ describe("web smoke", () => {
     expect(screen.getByText("TikTok")).toBeTruthy();
     expect(screen.getByText("Shopee")).toBeTruthy();
     expect(screen.getByRole("button", { name: /hapus job/i })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /retry/i }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
   });
 });
