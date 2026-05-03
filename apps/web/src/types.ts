@@ -1,5 +1,7 @@
 export type PlatformId = "tiktok" | "youtube" | "facebook" | "shopee";
 
+export type CtaMode = "random" | "sequential";
+
 export type VoiceGender = "female" | "male" | "neutral";
 
 export type PlatformStatus = "pending" | "running" | "done" | "failed" | "interrupted";
@@ -26,6 +28,8 @@ export interface AppSettings {
   maxVideoSeconds: number;
   safetyMode: "safe_marketing";
   ctaPosition: "end";
+  ctaMode: CtaMode;
+  ctaSequence: Record<PlatformId, number>;
   concurrency: 1;
   platforms: PlatformSettings[];
 }

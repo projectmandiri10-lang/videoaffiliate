@@ -374,12 +374,6 @@ export function JobsPage({
     platform: JobRecord["platforms"][number]
   ): Array<{ label: string; href: string }> => {
     const links: Array<{ label: string; href: string }> = [];
-    if (platform.scriptPath) {
-      links.push({ label: "Script TXT", href: toAbsoluteOutputUrl(platform.scriptPath) });
-    }
-    if (platform.srtPath) {
-      links.push({ label: "SRT", href: toAbsoluteOutputUrl(platform.srtPath) });
-    }
     if (platform.mp4Path) {
       links.push({ label: "MP4", href: toAbsoluteOutputUrl(platform.mp4Path) });
     }
@@ -825,4 +819,3 @@ export function JobsPage({
     </section>
   );
 }
-

@@ -2,6 +2,8 @@ export type PlatformId = "tiktok" | "youtube" | "facebook" | "shopee";
 
 export type SubtitleStyle = "short_punchy" | "clear" | "narrative" | "sales";
 
+export type CtaMode = "random" | "sequential";
+
 export type VoiceGender = "female" | "male" | "neutral";
 
 export type PlatformStatus = "pending" | "running" | "done" | "failed" | "interrupted";
@@ -28,6 +30,8 @@ export interface AppSettings {
   maxVideoSeconds: number;
   safetyMode: "safe_marketing";
   ctaPosition: "end";
+  ctaMode: CtaMode;
+  ctaSequence: Record<PlatformId, number>;
   concurrency: 1;
   platforms: PlatformSettings[];
 }
@@ -60,15 +64,17 @@ export interface JobRecord {
   platforms: PlatformRun[];
 }
 
-export interface UploadedGeminiVideo {
-  fileUri: string;
+export interface UploadedModelFile {
+  fileId?: string;
+  filename: string;
   mimeType: string;
+  inlineDataBase64?: string;
 }
 
 export interface GenerateScriptInput {
   model: string;
   prompt: string;
-  video: UploadedGeminiVideo;
+  video: UploadedModelFile;
 }
 
 export interface GenerateSpeechInput {
@@ -104,4 +110,19 @@ export interface GenerateSocialMetadataInput {
   description: string;
   platformId: PlatformId;
   scriptText: string;
+  ctaText: string;
+}
+
+export interface AIService {
+  uploadVideo(
+    filePath: string,
+    mimeType: string,
+    targetModel: string
+  ): Promise<UploadedModelFile>;
+  generateScript(input: GenerateScriptInput): Promise<string>;
+  generateSocialMetadata(input: GenerateSocialMetadataInput): Promise<SocialMetadata>;
+}
+
+export interface SpeechGenerator {
+  generateSpeech(input: GenerateSpeechInput): Promise<{ data: Buffer; mimeType: string }>;
 }

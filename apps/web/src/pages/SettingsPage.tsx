@@ -109,8 +109,12 @@ export function SettingsPage() {
     <section className="card">
       <h2>Settings</h2>
       <p className="section-note">
-        Tone, hook, dan subtitle style dikunci oleh sistem. Halaman ini mengatur voice dan speech
-        rate per platform.
+        Tone, hook, dan subtitle style dikunci oleh sistem. Isi `Script Model` dan `TTS Model`
+        sesuai provider masing-masing: script/caption lewat SnifoxAI, voice-over lewat Gemini TTS
+        direct. Jika upstream Google di SnifoxAI gagal, server akan fallback otomatis ke model
+        text-only yang tersedia. Jika Gemini TTS ditolak, server hanya akan fallback ke voice
+        Windows lokal bila ada voice Indonesia; kalau tidak ada, job akan gagal dengan pesan yang
+        jelas.
       </p>
       <form className="grid-form" onSubmit={onSave}>
         <label>
@@ -121,6 +125,7 @@ export function SettingsPage() {
               setSettings({ ...settings, scriptModel: event.target.value })
             }
           />
+          <span className="small">Contoh SnifoxAI: google/gemini-3-flash-preview.</span>
         </label>
         <label>
           TTS Model
@@ -128,6 +133,7 @@ export function SettingsPage() {
             value={settings.ttsModel}
             onChange={(event) => setSettings({ ...settings, ttsModel: event.target.value })}
           />
+          <span className="small">Dipakai oleh Gemini direct TTS, contoh: gemini-2.5-flash-preview-tts.</span>
         </label>
         <label>
           Max Video Seconds
@@ -140,6 +146,21 @@ export function SettingsPage() {
               setSettings({ ...settings, maxVideoSeconds: Number(event.target.value) })
             }
           />
+        </label>
+        <label>
+          CTA Mode
+          <select
+            value={settings.ctaMode}
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                ctaMode: event.target.value as AppSettings["ctaMode"]
+              })
+            }
+          >
+            <option value="random">Random</option>
+            <option value="sequential">Berurutan</option>
+          </select>
         </label>
         <div className="style-grid">
           {settings.platforms.map((platform) => (

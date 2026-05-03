@@ -23,12 +23,19 @@ vi.mock("./api", async () => {
 });
 
 const mockSettings = {
-  scriptModel: "gemini-3-flash-preview",
+  scriptModel: "google/gemini-3-flash-preview",
   ttsModel: "gemini-2.5-flash-preview-tts",
   language: "id-ID" as const,
   maxVideoSeconds: 60,
   safetyMode: "safe_marketing" as const,
   ctaPosition: "end" as const,
+  ctaMode: "random" as const,
+  ctaSequence: {
+    tiktok: 0,
+    youtube: 0,
+    facebook: 0,
+    shopee: 0
+  },
   concurrency: 1 as const,
   platforms: [
     {
@@ -114,6 +121,7 @@ describe("web smoke", () => {
         0
       );
     });
+    expect(screen.getByDisplayValue("Random")).toBeTruthy();
     expect(screen.getByRole("heading", { name: /TikTok/i })).toBeTruthy();
   });
 

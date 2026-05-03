@@ -1,17 +1,28 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyBaseLogger } from "fastify";
-import type { AppSettings, JobRecord, PlatformId, PlatformRun } from "../types.js";
-import { PLATFORM_CONFIG, PLATFORM_LABELS } from "../platform-config.js";
+import type {
+  AIService,
+  AppSettings,
+  JobRecord,
+  PlatformId,
+  PlatformRun,
+  SpeechGenerator
+} from "../types.js";
+import { PLATFORM_LABELS } from "../platform-config.js";
 import { JobsStore } from "../stores/jobs-store.js";
 import { SettingsStore } from "../stores/settings-store.js";
 import { buildScriptPrompt } from "./prompt-builder.js";
-import { GeminiService } from "./gemini-service.js";
-import { OUTPUTS_DIR } from "../utils/paths.js";
-import { buildSrt } from "../utils/srt.js";
+import { OUTPUTS_DIR, outputUrlToAbsolutePath } from "../utils/paths.js";
 import { combineVideoWithVoiceOver, writeWav24kMono } from "../utils/audio.js";
+import { formatCtaAsSentence } from "../utils/cta.js";
 import { ensureSocialMetadata } from "../utils/model-output.js";
 import { resolveVersionedBaseName } from "../utils/filename.js";
+import {
+  buildRateLimitErrorMessage,
+  extractErrorMessage,
+  isRateLimitError
+} from "../utils/llm-error.js";
 
 interface QueueItem {
   jobId: string;
@@ -26,9 +37,10 @@ function findPlatformSettings(settings: AppSettings, platformId: PlatformId) {
   return settings.platforms.find((platform) => platform.platformId === platformId);
 }
 
-function fallbackCaption(title: string, description: string): string {
+function fallbackCaption(title: string, description: string, ctaText: string): string {
   const shortDescription = description.split(".")[0]?.trim() || description.trim();
-  return `${title} - ${shortDescription}. Cek detail produk di keranjang sekarang.`
+  const ctaSentence = formatCtaAsSentence(ctaText);
+  return `${title} - ${shortDescription}. ${ctaSentence}`
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 220);
@@ -53,42 +65,36 @@ function fallbackHashtags(title: string, platformId: PlatformId): string[] {
   return [...baseByPlatform[platformId], ...words];
 }
 
-function parseGeminiQuotaMessage(message: string): string | undefined {
-  try {
-    const payload = JSON.parse(message) as {
-      error?: {
-        code?: number;
-        status?: string;
-        details?: Array<Record<string, unknown>>;
-      };
-    };
-    const status = payload.error?.status || "";
-    const code = payload.error?.code || 0;
-    if (!(status === "RESOURCE_EXHAUSTED" || code === 429)) {
-      return undefined;
-    }
-
-    let retryDelay = "";
-    for (const detail of payload.error?.details || []) {
-      const detailType = String(detail["@type"] || "");
-      if (detailType.includes("RetryInfo")) {
-        retryDelay = String(detail["retryDelay"] || "").trim();
-      }
-    }
-
-    const retryText = retryDelay ? ` Coba lagi dalam ${retryDelay}.` : "";
-    return `Kuota Gemini habis untuk saat ini.${retryText} Cek billing/quota API key Anda atau tunggu reset kuota.`;
-  } catch {
-    return undefined;
-  }
-}
-
 function toOutputUrl(platformId: PlatformId, filename: string): string {
   return `/outputs/${platformId}/${encodeURIComponent(filename)}`;
 }
 
-function mergeArtifactPaths(current: string[], latest: string[]): string[] {
-  return [...new Set([...current, ...latest])];
+function listPlatformArtifactUrls(platform?: PlatformRun): string[] {
+  if (!platform) {
+    return [];
+  }
+  return [
+    ...new Set(
+      [
+        ...(platform.artifactPaths || []),
+        platform.scriptPath,
+        platform.srtPath,
+        platform.mp4Path,
+        platform.captionPath
+      ].filter((value): value is string => Boolean(value))
+    )
+  ];
+}
+
+function listObsoletePlatformArtifactPaths(
+  platform: PlatformRun | undefined,
+  latestOutputUrls: string[]
+): string[] {
+  const latest = new Set(latestOutputUrls);
+  return listPlatformArtifactUrls(platform)
+    .filter((outputUrl) => !latest.has(outputUrl))
+    .map((outputUrl) => outputUrlToAbsolutePath(outputUrl))
+    .filter((filePath): filePath is string => Boolean(filePath));
 }
 
 export interface IJobProcessor {
@@ -103,7 +109,8 @@ export class JobProcessor implements IJobProcessor {
   public constructor(
     private readonly jobsStore: JobsStore,
     private readonly settingsStore: SettingsStore,
-    private readonly gemini: GeminiService,
+    private readonly aiService: AIService,
+    private readonly speechGenerator: SpeechGenerator,
     private readonly logger: FastifyBaseLogger
   ) {}
 
@@ -169,7 +176,11 @@ export class JobProcessor implements IJobProcessor {
 
     let uploadedVideo;
     try {
-      uploadedVideo = await this.gemini.uploadVideo(job.videoPath, job.videoMimeType);
+      uploadedVideo = await this.aiService.uploadVideo(
+        job.videoPath,
+        job.videoMimeType,
+        settings.scriptModel
+      );
     } catch (error) {
       const message = this.toErrorMessage(error);
       await this.markPlatformsFailed(item.jobId, selectedPlatformIds, message);
@@ -199,15 +210,18 @@ export class JobProcessor implements IJobProcessor {
       await this.updatePlatform(item.jobId, platformId, "running");
 
       const attemptOutputPaths: string[] = [];
+      const previousPlatform = job.platforms.find((platform) => platform.platformId === platformId);
       try {
+        const selectedCta = await this.settingsStore.pickCta(platformId);
         const scriptPrompt = buildScriptPrompt({
           settings,
           platformId,
           title: job.title,
           description: job.description,
-          videoDurationSec: job.videoDurationSec
+          videoDurationSec: job.videoDurationSec,
+          ctaText: selectedCta.ctaText
         });
-        const scriptText = await this.gemini.generateScript({
+        const scriptText = await this.aiService.generateScript({
           model: settings.scriptModel,
           prompt: scriptPrompt,
           video: uploadedVideo
@@ -219,39 +233,28 @@ export class JobProcessor implements IJobProcessor {
         const baseName = await resolveVersionedBaseName({
           directory: outputDir,
           preferredBaseName: job.title,
-          suffixes: [".mp4", ".srt", ".txt", "-caption.txt"]
+          suffixes: [".mp4", "-caption.txt", ".srt", ".txt"]
         });
-        const scriptFilename = `${baseName}.txt`;
-        const srtFilename = `${baseName}.srt`;
         const mp4Filename = `${baseName}.mp4`;
         const captionFilename = `${baseName}-caption.txt`;
 
-        const scriptPath = path.join(outputDir, scriptFilename);
-        const srtPath = path.join(outputDir, srtFilename);
         const mp4Path = path.join(outputDir, mp4Filename);
         const captionPath = path.join(outputDir, captionFilename);
-        attemptOutputPaths.push(scriptPath, srtPath, mp4Path, captionPath);
-
-        await writeFile(scriptPath, `${scriptText.trim()}\n`, "utf8");
-        const srtContent = buildSrt(
-          scriptText,
-          job.videoDurationSec,
-          PLATFORM_CONFIG[platformId].srtStyle
-        );
-        await writeFile(srtPath, srtContent, "utf8");
+        attemptOutputPaths.push(mp4Path, captionPath);
 
         const fallbackSocial = {
-          caption: fallbackCaption(job.title, job.description),
+          caption: fallbackCaption(job.title, job.description, selectedCta.ctaText),
           hashtags: fallbackHashtags(job.title, platformId)
         };
         const socialMetadata = await (async () => {
           try {
-            const candidate = await this.gemini.generateSocialMetadata({
+            const candidate = await this.aiService.generateSocialMetadata({
               model: settings.scriptModel,
               title: job.title,
               description: job.description,
               platformId,
-              scriptText
+              scriptText,
+              ctaText: selectedCta.ctaText
             });
             return ensureSocialMetadata(
               candidate,
@@ -274,7 +277,7 @@ export class JobProcessor implements IJobProcessor {
         await writeFile(captionPath, `${captionFileParts.join("\n\n")}\n`, "utf8");
 
         const tempWavPath = path.join(path.dirname(job.videoPath), `${platformId}-tts.wav`);
-        const audio = await this.gemini.generateSpeech({
+        const audio = await this.speechGenerator.generateSpeech({
           model: settings.ttsModel,
           text: scriptText,
           voiceName: platformSettings.voiceName,
@@ -294,11 +297,25 @@ export class JobProcessor implements IJobProcessor {
         );
 
         const latestUrls = [
-          toOutputUrl(platformId, scriptFilename),
-          toOutputUrl(platformId, srtFilename),
           toOutputUrl(platformId, mp4Filename),
           toOutputUrl(platformId, captionFilename)
         ];
+
+        const obsoleteOutputPaths = listObsoletePlatformArtifactPaths(previousPlatform, latestUrls);
+        if (obsoleteOutputPaths.length > 0) {
+          try {
+            await Promise.all(
+              obsoleteOutputPaths.map((outputPath) =>
+                rm(outputPath, { recursive: false, force: true })
+              )
+            );
+          } catch (cleanupError) {
+            this.logger.warn(
+              { err: cleanupError, jobId: item.jobId, platformId },
+              "Gagal membersihkan output lama platform."
+            );
+          }
+        }
 
         await this.jobsStore.update(item.jobId, (current) => ({
           ...current,
@@ -309,13 +326,13 @@ export class JobProcessor implements IJobProcessor {
                   ...platform,
                   status: "done",
                   errorMessage: undefined,
-                  scriptPath: latestUrls[0],
-                  srtPath: latestUrls[1],
-                  mp4Path: latestUrls[2],
-                  captionPath: latestUrls[3],
+                  scriptPath: undefined,
+                  srtPath: undefined,
+                  mp4Path: latestUrls[0],
+                  captionPath: latestUrls[1],
                   captionText: socialMetadata.caption,
                   hashtags: socialMetadata.hashtags,
-                  artifactPaths: mergeArtifactPaths(platform.artifactPaths, latestUrls),
+                  artifactPaths: latestUrls,
                   updatedAt: nowIso()
                 }
               : platform
@@ -396,11 +413,9 @@ export class JobProcessor implements IJobProcessor {
   }
 
   private toErrorMessage(error: unknown): string {
-    const message = (error as { message?: string })?.message || "Error tidak diketahui.";
-    const quotaMessage = parseGeminiQuotaMessage(message);
-    if (quotaMessage) {
-      return quotaMessage;
+    if (isRateLimitError(error)) {
+      return `${buildRateLimitErrorMessage(error)} Cek quota/key SnifoxAI Anda atau tunggu reset limit.`;
     }
-    return message;
+    return extractErrorMessage(error);
   }
 }

@@ -7,6 +7,7 @@ describe("validation", () => {
     const parsed = parseSettings(DEFAULT_SETTINGS);
     expect(parsed.scriptModel).toBe(DEFAULT_SETTINGS.scriptModel);
     expect(parsed.platforms).toHaveLength(4);
+    expect(parsed.ctaMode).toBe(DEFAULT_SETTINGS.ctaMode);
   });
 
   it("rejects invalid model", () => {
@@ -37,5 +38,14 @@ describe("validation", () => {
   it("validates retry platform id", () => {
     expect(parseRetryPlatformId({ platformId: "shopee" })).toBe("shopee");
     expect(() => parseRetryPlatformId({ platformId: "unknown" })).toThrow();
+  });
+
+  it("fills CTA defaults for legacy settings shape", () => {
+    const { ctaMode: _ignoredMode, ctaSequence: _ignoredSequence, ...legacyLike } =
+      DEFAULT_SETTINGS;
+    const parsed = parseSettings(legacyLike);
+    expect(parsed.ctaMode).toBe("random");
+    expect(parsed.ctaSequence.tiktok).toBe(0);
+    expect(parsed.ctaSequence.shopee).toBe(0);
   });
 });

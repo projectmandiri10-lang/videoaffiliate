@@ -6,13 +6,37 @@ import { DEFAULT_PORT } from "./constants.js";
 dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 
 export interface AppEnv {
-  geminiApiKey: string;
+  snifoxApiBase: string;
+  snifoxApiKey: string;
+  geminiTtsApiKey: string;
   port: number;
   webOrigins: string[];
 }
 
+function normalizeSnifoxBase(input: string): string {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error(
+      "SNIFOX_API_BASE tidak valid. Gunakan URL penuh, contoh: https://core.snifoxai.com/v1"
+    );
+  }
+
+  const cleanPath = url.pathname.replace(/\/+$/, "");
+  url.pathname = cleanPath.endsWith("/v1") ? cleanPath || "/v1" : `${cleanPath || ""}/v1`;
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 export function loadEnv(): AppEnv {
-  const geminiApiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
+  const snifoxApiBaseRaw =
+    process.env.SNIFOX_API_BASE?.trim() ?? process.env.LITELLM_API_BASE?.trim() ?? "";
+  const snifoxApiKey =
+    process.env.SNIFOX_API_KEY?.trim() ?? process.env.LITELLM_API_KEY?.trim() ?? "";
+  const geminiTtsApiKey =
+    process.env.GEMINI_TTS_API_KEY?.trim() ?? process.env.GEMINI_API_KEY?.trim() ?? "";
   const portRaw = process.env.PORT?.trim();
   const port = portRaw ? Number(portRaw) : DEFAULT_PORT;
   const webOrigins = (process.env.WEB_ORIGIN?.trim() || "http://localhost:5173")
@@ -20,9 +44,21 @@ export function loadEnv(): AppEnv {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
-  if (!geminiApiKey) {
+  if (!snifoxApiBaseRaw) {
     throw new Error(
-      "GEMINI_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example."
+      "SNIFOX_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example."
+    );
+  }
+
+  if (!snifoxApiKey) {
+    throw new Error(
+      "SNIFOX_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example."
+    );
+  }
+
+  if (!geminiTtsApiKey) {
+    throw new Error(
+      "GEMINI_TTS_API_KEY tidak ditemukan. Isi API key Gemini untuk voice-over, atau gunakan GEMINI_API_KEY sebagai fallback."
     );
   }
 
@@ -36,5 +72,11 @@ export function loadEnv(): AppEnv {
     );
   }
 
-  return { geminiApiKey, port, webOrigins };
+  return {
+    snifoxApiBase: normalizeSnifoxBase(snifoxApiBaseRaw),
+    snifoxApiKey,
+    geminiTtsApiKey,
+    port,
+    webOrigins
+  };
 }

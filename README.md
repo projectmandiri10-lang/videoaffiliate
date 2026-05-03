@@ -1,14 +1,14 @@
-# Auto SRT + Voice Over (Gemini)
+# Auto Voice Over + Caption (SnifoxAI + Gemini)
 
 Aplikasi untuk otomatisasi:
 - input: `video + judul + deskripsi + affiliate link`
-- output per style: `.srt`, `.wav` (24kHz mono), `.mp4` (video + voice-over), dan `caption + hashtags` siap upload Facebook Reels (juga tersimpan sebagai file `.txt`)
+- output per platform: `.mp4` (video + voice-over) dan `caption + hashtags` siap upload (tersimpan sebagai file `-caption.txt`)
 - style default: `evergreen`, `soft_selling`, `hard_selling`, `problem_solution`
 
 ## Stack
 - Frontend: React + Vite + TypeScript
 - Backend: Fastify + TypeScript
-- AI: Gemini (`@google/genai`)
+- AI: SnifoxAI Gateway untuk script/caption + Gemini native untuk TTS voice-over, dengan fallback otomatis ke model text-only SnifoxAI dan voice Windows lokal saat provider utama gagal
 - Media: `ffmpeg-static` + `ffprobe-static` (tanpa install FFmpeg global)
 - Runtime aplikasi: Node.js (Python tidak dipakai untuk runtime aplikasi ini)
 
@@ -17,7 +17,7 @@ Aplikasi untuk otomatisasi:
 - `apps/web`: UI
 - `data/settings.json`: konfigurasi model/prompt/voice
 - `data/jobs.json`: metadata 20 job terakhir
-- `outputs/<jobId>`: file hasil `.srt`, `.wav`, `.mp4`, dan `*-caption.txt`
+- `outputs/<platformId>`: file hasil `.mp4` dan `*-caption.txt`
 - `uploads/<jobId>`: video source upload
 
 ## Setup
@@ -29,7 +29,7 @@ npm install
 ```bash
 copy .env.example .env
 ```
-3. Isi `GEMINI_API_KEY` di `.env`.
+3. Isi `SNIFOX_API_BASE`, `SNIFOX_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
 
 ## Menjalankan (dev)
 ```bash
@@ -68,7 +68,9 @@ npm run start
 1. Upload source project (tanpa folder cache lokal seperti `node_modules`).
 2. Buat `.env` di server:
 ```env
-GEMINI_API_KEY=...
+SNIFOX_API_BASE=https://core.snifoxai.com/v1
+SNIFOX_API_KEY=snfx-your-api-key
+GEMINI_TTS_API_KEY=...
 PORT=<port_dari_cpanel>
 WEB_ORIGIN=https://domain-anda
 ```
@@ -88,7 +90,7 @@ npm run start
 7. Verifikasi:
 - `GET https://domain-anda/api/health`
 - buka UI di `https://domain-anda`
-- buat job, lalu cek link output (MP4/WAV/SRT/TXT) di tab `Jobs`
+- buat job, lalu cek link output `MP4` dan `Caption TXT` di tab `Jobs`
 
 ## Endpoint API
 - `GET /api/health`
@@ -109,6 +111,13 @@ npm run start
 - Output file di tab `Jobs` tersedia sebagai link langsung (browser-friendly untuk desktop dan Android).
 - Form `Generate` menyediakan kotak `Affiliate Link`.
 - Tab `Jobs` menampilkan caption final siap copy (caption + hashtag + affiliate link job).
+- `scriptModel` harus memakai ID model SnifoxAI lengkap, contoh `google/gemini-3-flash-preview`.
+- `ttsModel` tetap model Gemini direct untuk voice-over, contoh `gemini-2.5-flash-preview-tts`.
+- Jika model Google di SnifoxAI sedang gagal di upstream, server otomatis fallback ke model text-only yang masih tersedia agar caption/script tetap jalan.
+- Jika Gemini TTS mengembalikan `403 PERMISSION_DENIED` atau gagal di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.
+- Base URL resmi SnifoxAI: `https://core.snifoxai.com/v1`
+- Daftar model: `https://snifoxai.com/models`
+- Dokumentasi: `https://snifoxai.com/docs`
 
 ## Testing
 ```bash

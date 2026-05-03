@@ -1,7 +1,10 @@
 import { buildApp } from "./app.js";
 import { loadEnv } from "./config.js";
+import { FallbackSpeechGenerator } from "./services/fallback-speech-generator.js";
 import { JobProcessor } from "./services/job-processor.js";
-import { GeminiService } from "./services/gemini-service.js";
+import { GeminiTtsService } from "./services/gemini-tts-service.js";
+import { SnifoxService } from "./services/snifox-service.js";
+import { WindowsTtsService } from "./services/windows-tts-service.js";
 import { JobsStore } from "./stores/jobs-store.js";
 import { SettingsStore } from "./stores/settings-store.js";
 import { logger } from "./utils/logger.js";
@@ -15,15 +18,18 @@ async function bootstrap(): Promise<void> {
   const jobsStore = new JobsStore();
   await jobsStore.markRunningAsInterrupted();
 
-  const gemini = new GeminiService(env.geminiApiKey, logger);
-  const processor = new JobProcessor(jobsStore, settingsStore, gemini, logger);
+  const snifox = new SnifoxService(env.snifoxApiBase, env.snifoxApiKey, logger);
+  const geminiTts = new GeminiTtsService(env.geminiTtsApiKey, logger);
+  const windowsTts = new WindowsTtsService(logger);
+  const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, geminiTts);
+  const processor = new JobProcessor(jobsStore, settingsStore, snifox, speechGenerator, logger);
   const app = await buildApp({
     logger,
     webOrigins: env.webOrigins,
     settingsStore,
     jobsStore,
     processor,
-    speechGenerator: gemini
+    speechGenerator
   });
 
   await app.listen({

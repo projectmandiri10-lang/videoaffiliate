@@ -34,7 +34,7 @@ describe("job processor", () => {
     await settingsStore.set(DEFAULT_SETTINGS);
   });
 
-  it("writes latest outputs to outputs/platform and stores script txt path", async () => {
+  it("writes only mp4 and caption outputs to outputs/platform", async () => {
     const jobId = "job-processor-1";
     const uploadDir = path.join(UPLOADS_DIR, jobId);
     const videoPath = path.join(uploadDir, "source.mp4");
@@ -61,26 +61,30 @@ describe("job processor", () => {
     };
     await jobsStore.create(job);
 
-    const gemini = {
+    const aiService = {
       uploadVideo: vi.fn(async () => ({
-        fileUri: "mock://video",
+        fileId: "mock-video",
+        filename: "source.mp4",
         mimeType: "video/mp4"
       })),
       generateScript: vi.fn(async () => "Ini script untuk sabun jerawat yang singkat dan jelas."),
-      generateSpeech: vi.fn(async () => ({
-        data: Buffer.from("audio"),
-        mimeType: "audio/wav"
-      })),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption sabun jerawat.",
         hashtags: ["#affiliate", "#sabunjerawat"]
+      }))
+    };
+    const speechGenerator = {
+      generateSpeech: vi.fn(async () => ({
+        data: Buffer.from("audio"),
+        mimeType: "audio/wav"
       }))
     };
 
     const processor = new JobProcessor(
       jobsStore,
       settingsStore,
-      gemini as never,
+      aiService as never,
+      speechGenerator,
       logger
     );
 
@@ -90,14 +94,20 @@ describe("job processor", () => {
     const updated = await jobsStore.getById(jobId);
     const tiktok = updated?.platforms.find((platform) => platform.platformId === "tiktok");
     expect(tiktok?.status).toBe("done");
-    expect(tiktok?.scriptPath).toBe("/outputs/tiktok/sabun-jerawat.txt");
-    expect(tiktok?.srtPath).toBe("/outputs/tiktok/sabun-jerawat.srt");
     expect(tiktok?.mp4Path).toBe("/outputs/tiktok/sabun-jerawat.mp4");
-    expect(tiktok?.artifactPaths).toContain("/outputs/tiktok/sabun-jerawat.txt");
+    expect(tiktok?.captionPath).toBe("/outputs/tiktok/sabun-jerawat-caption.txt");
+    expect(tiktok?.scriptPath).toBeUndefined();
+    expect(tiktok?.srtPath).toBeUndefined();
+    expect(tiktok?.artifactPaths).toEqual([
+      "/outputs/tiktok/sabun-jerawat.mp4",
+      "/outputs/tiktok/sabun-jerawat-caption.txt"
+    ]);
     expect(updated?.overallStatus).toBe("queued");
 
-    const scriptFile = outputUrlToAbsolutePath(tiktok?.scriptPath || "");
-    expect(scriptFile).toBe(path.join(OUTPUTS_DIR, "tiktok", "sabun-jerawat.txt"));
-    expect(await readFile(scriptFile!, "utf8")).toContain("Ini script untuk sabun jerawat");
+    const mp4File = outputUrlToAbsolutePath(tiktok?.mp4Path || "");
+    const captionFile = outputUrlToAbsolutePath(tiktok?.captionPath || "");
+    expect(mp4File).toBe(path.join(OUTPUTS_DIR, "tiktok", "sabun-jerawat.mp4"));
+    expect(captionFile).toBe(path.join(OUTPUTS_DIR, "tiktok", "sabun-jerawat-caption.txt"));
+    expect(await readFile(captionFile!, "utf8")).toContain("Caption sabun jerawat.");
   });
 });

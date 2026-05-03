@@ -84,6 +84,32 @@ function extractHashtagsFromText(text: string): string[] {
   return sanitizeHashtags(matches);
 }
 
+function extractTextFromOpenAiMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((part) => {
+      if (!part || typeof part !== "object") {
+        return "";
+      }
+
+      if ((part as { type?: string }).type === "text") {
+        return String((part as { text?: string }).text || "").trim();
+      }
+
+      return "";
+    })
+    .filter((value) => value.length > 0)
+    .join("\n")
+    .trim();
+}
+
 export function extractSocialMetadata(response: unknown): {
   caption: string;
   hashtags: string[];
@@ -135,6 +161,21 @@ export function extractTextFromResponse(response: unknown): string {
     return "";
   }
 
+  const choices = (response as { choices?: unknown[] }).choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const message = (choices[0] as { message?: { content?: unknown; audio?: { transcript?: string } } })
+      ?.message;
+    const text = extractTextFromOpenAiMessageContent(message?.content);
+    if (text) {
+      return text;
+    }
+
+    const transcript = String(message?.audio?.transcript || "").trim();
+    if (transcript) {
+      return transcript;
+    }
+  }
+
   const maybeText = (response as { text?: unknown }).text;
   if (typeof maybeText === "string") {
     return maybeText.trim();
@@ -182,6 +223,25 @@ export interface ExtractedAudio {
 }
 
 export function extractAudioFromResponse(response: unknown): ExtractedAudio {
+  const openAiAudio = (
+    response as {
+      choices?: Array<{
+        message?: {
+          audio?: {
+            data?: string;
+          };
+        };
+      }>;
+    }
+  )?.choices?.[0]?.message?.audio;
+
+  if (openAiAudio?.data) {
+    return {
+      data: Buffer.from(openAiAudio.data, "base64"),
+      mimeType: "audio/pcm"
+    };
+  }
+
   const candidates = (response as { candidates?: unknown[] })?.candidates;
   if (!Array.isArray(candidates) || !candidates.length) {
     throw new Error("Respons TTS tidak memiliki kandidat audio.");

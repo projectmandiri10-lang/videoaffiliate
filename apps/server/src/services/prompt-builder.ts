@@ -1,3 +1,4 @@
+import { buildPlatformCtaInstruction } from "../utils/cta.js";
 import type { AppSettings, PlatformId } from "../types.js";
 import { PLATFORM_CONFIG, PLATFORM_LABELS } from "../platform-config.js";
 
@@ -7,6 +8,7 @@ export interface PromptInput {
   title: string;
   description: string;
   videoDurationSec: number;
+  ctaText: string;
 }
 
 function estimateWordRange(durationSec: number): { min: number; target: number; max: number } {
@@ -35,8 +37,8 @@ export function buildScriptPrompt(input: PromptInput): string {
     "- Fokus pada manfaat produk, konteks video, dan alasan orang tertarik untuk klik.",
     `- Panjang naskah harus sekitar ${words.target} kata (rentang ${words.min}-${words.max} kata) agar pas untuk durasi video ${input.videoDurationSec.toFixed(2)} detik.`,
     `- ${ctaInstruction}`,
-    '- CTA wajib mengarahkan penonton untuk cek keranjang produk.',
-    '- Gunakan CTA yang jelas dan natural seperti "cek keranjang" atau "ambil lewat keranjang".',
+    "- CTA wajib sesuai kebiasaan platform target, tidak generik untuk semua platform.",
+    buildPlatformCtaInstruction(input.settings.ctaMode, input.ctaText),
     "",
     `Platform target: ${PLATFORM_LABELS[input.platformId]}`,
     `Tone utama: ${platform.tone}`,
@@ -54,6 +56,7 @@ export interface ReelsMetadataPromptInput {
   description: string;
   platformId: PlatformId;
   scriptText: string;
+  ctaText: string;
 }
 
 export function buildReelsMetadataPrompt(input: ReelsMetadataPromptInput): string {
@@ -63,7 +66,7 @@ export function buildReelsMetadataPrompt(input: ReelsMetadataPromptInput): strin
     "Aturan:",
     "- Bahasa Indonesia.",
     "- Caption maksimal 220 karakter, 1-2 kalimat, soft CTA di akhir.",
-    "- CTA harus mengarahkan penonton untuk cek keranjang produk.",
+    '- CTA akhir caption harus mengikuti pola yang dekat dengan: "' + input.ctaText + '".',
     "- Jangan klaim berlebihan atau absolut.",
     "- Hashtags 6 sampai 10, relevan produk, semuanya diawali #.",
     "- Kembalikan HANYA JSON valid tanpa markdown.",

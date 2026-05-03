@@ -8,6 +8,7 @@ export interface PlatformDefinition {
   srtStyle: SubtitleStyle;
   defaultVoiceName: string;
   defaultSpeechRate: number;
+  ctaVariants: string[];
 }
 
 export const PLATFORM_ORDER: PlatformId[] = [
@@ -25,7 +26,13 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
     hook: "curiosity",
     srtStyle: "short_punchy",
     defaultVoiceName: "Leda",
-    defaultSpeechRate: 1
+    defaultSpeechRate: 1,
+    ctaVariants: [
+      "cek keranjang kuningnya sekarang kalau mau lihat detailnya",
+      "klik keranjang kuning buat cek harga dan variannya",
+      "kalau cocok, langsung buka keranjang kuningnya",
+      "lihat detail produknya dulu di keranjang kuning"
+    ]
   },
   youtube: {
     label: "YouTube Shorts",
@@ -34,7 +41,13 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
     hook: "problem_solution",
     srtStyle: "clear",
     defaultVoiceName: "Charon",
-    defaultSpeechRate: 1
+    defaultSpeechRate: 1,
+    ctaVariants: [
+      "cek link produk di deskripsi untuk lihat detail lengkapnya",
+      "kalau mau lihat harga dan spesifikasinya, buka link di deskripsi",
+      "langsung cek link di deskripsi atau komentar tersemat",
+      "lihat produk lengkapnya lewat link yang ada di deskripsi"
+    ]
   },
   facebook: {
     label: "Facebook",
@@ -43,7 +56,13 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
     hook: "emotional",
     srtStyle: "narrative",
     defaultVoiceName: "Aoede",
-    defaultSpeechRate: 1
+    defaultSpeechRate: 1,
+    ctaVariants: [
+      "cek link produknya di komentar atau deskripsi",
+      "kalau tertarik, buka tautannya di komentar",
+      "lihat detail lengkapnya lewat link di komentar dan deskripsi",
+      "langsung cek link di komentar buat lihat produknya"
+    ]
   },
   shopee: {
     label: "Shopee",
@@ -52,7 +71,13 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
     hook: "cta",
     srtStyle: "sales",
     defaultVoiceName: "Kore",
-    defaultSpeechRate: 1
+    defaultSpeechRate: 1,
+    ctaVariants: [
+      "cek produknya langsung di keranjang atau etalase",
+      "kalau mau beli, langsung buka halaman produknya di Shopee",
+      "lihat harga dan variannya langsung di halaman produk",
+      "langsung masuk ke produk Shopee ini kalau mau checkout"
+    ]
   }
 };
 
@@ -63,3 +88,13 @@ export const PLATFORM_LABELS: Record<PlatformId, string> = PLATFORM_ORDER.reduce
   },
   {} as Record<PlatformId, string>
 );
+
+export function createDefaultCtaSequence(): Record<PlatformId, number> {
+  return PLATFORM_ORDER.reduce(
+    (accumulator, platformId) => {
+      accumulator[platformId] = 0;
+      return accumulator;
+    },
+    {} as Record<PlatformId, number>
+  );
+}

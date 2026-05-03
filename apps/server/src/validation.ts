@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { isKnownTtsVoiceName, PLATFORM_ORDER } from "./constants.js";
 import type { AppSettings, PlatformId } from "./types.js";
+import { createDefaultCtaSequence } from "./platform-config.js";
 
 const platformIdSchema = z.enum(PLATFORM_ORDER);
 const nonEmptyTextSchema = z.string().trim().min(1);
 const speechRateSchema = z.number().min(0.7).max(1.3);
+const ctaModeSchema = z.enum(["random", "sequential"]);
 
 const platformSchema = z.object({
   platformId: platformIdSchema,
@@ -17,6 +19,13 @@ const platformSchema = z.object({
   speechRate: speechRateSchema
 });
 
+const ctaSequenceSchema = z.object({
+  tiktok: z.number().int().min(0).default(0),
+  youtube: z.number().int().min(0).default(0),
+  facebook: z.number().int().min(0).default(0),
+  shopee: z.number().int().min(0).default(0)
+});
+
 export const settingsSchema = z.object({
   scriptModel: z.string().trim().min(1),
   ttsModel: z.string().trim().min(1),
@@ -24,6 +33,8 @@ export const settingsSchema = z.object({
   maxVideoSeconds: z.number().int().min(10).max(180),
   safetyMode: z.literal("safe_marketing"),
   ctaPosition: z.literal("end"),
+  ctaMode: ctaModeSchema.default("random"),
+  ctaSequence: ctaSequenceSchema.default(createDefaultCtaSequence()),
   concurrency: z.literal(1),
   platforms: z
     .array(platformSchema)

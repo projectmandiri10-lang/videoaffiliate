@@ -27,6 +27,19 @@ describe("model output parser", () => {
     expect(extractScriptText(response)).toContain("Script langsung");
   });
 
+  it("extracts script from openai-compatible message content", () => {
+    const response = {
+      choices: [
+        {
+          message: {
+            content: "Naskah dari SnifoxAI."
+          }
+        }
+      ]
+    };
+    expect(extractScriptText(response)).toBe("Naskah dari SnifoxAI.");
+  });
+
   it("extracts base64 audio", () => {
     const base64 = Buffer.from("test-audio").toString("base64");
     const response = {
@@ -43,6 +56,25 @@ describe("model output parser", () => {
     expect(audio.mimeType).toBe("audio/wav");
   });
 
+  it("extracts openai-compatible audio payload", () => {
+    const base64 = Buffer.from("pcm-audio").toString("base64");
+    const response = {
+      choices: [
+        {
+          message: {
+            audio: {
+              data: base64,
+              transcript: "Voice transcript"
+            }
+          }
+        }
+      ]
+    };
+    const audio = extractAudioFromResponse(response);
+    expect(audio.data.toString("utf8")).toBe("pcm-audio");
+    expect(audio.mimeType).toBe("audio/pcm");
+  });
+
   it("extracts social metadata from json", () => {
     const response = {
       text: '{"caption":"Produk praktis buat harian kamu. Klik untuk lihat detail!","hashtags":["#reelsfacebook","#affiliate","#produkviral"]}'
@@ -50,6 +82,22 @@ describe("model output parser", () => {
     const social = extractSocialMetadata(response);
     expect(social.caption).toContain("Produk praktis");
     expect(social.hashtags).toContain("#affiliate");
+  });
+
+  it("extracts social metadata from openai-compatible json text", () => {
+    const response = {
+      choices: [
+        {
+          message: {
+            content:
+              '{"caption":"Produk hemat buat harian kamu.","hashtags":["#hemat","#affiliate"]}'
+          }
+        }
+      ]
+    };
+    const social = extractSocialMetadata(response);
+    expect(social.caption).toContain("Produk hemat");
+    expect(social.hashtags).toEqual(["#hemat", "#affiliate"]);
   });
 
   it("falls back to default metadata if hashtags empty", () => {

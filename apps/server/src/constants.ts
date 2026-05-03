@@ -1,5 +1,10 @@
 import type { AppSettings, ExcitedVoicePreset, TtsVoiceOption } from "./types.js";
-import { PLATFORM_CONFIG, PLATFORM_ORDER, PLATFORM_LABELS } from "./platform-config.js";
+import {
+  PLATFORM_CONFIG,
+  PLATFORM_ORDER,
+  PLATFORM_LABELS,
+  createDefaultCtaSequence
+} from "./platform-config.js";
 
 export const MAX_HISTORY = 20;
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
@@ -8,12 +13,14 @@ export const DEFAULT_PORT = 8787;
 export { PLATFORM_CONFIG, PLATFORM_LABELS, PLATFORM_ORDER } from "./platform-config.js";
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  scriptModel: "gemini-3-flash-preview",
+  scriptModel: "google/gemini-3-flash-preview",
   ttsModel: "gemini-2.5-flash-preview-tts",
   language: "id-ID",
   maxVideoSeconds: 60,
   safetyMode: "safe_marketing",
   ctaPosition: "end",
+  ctaMode: "random",
+  ctaSequence: createDefaultCtaSequence(),
   concurrency: 1,
   platforms: PLATFORM_ORDER.map((platformId) => ({
     platformId,
