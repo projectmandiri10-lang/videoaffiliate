@@ -2,16 +2,16 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LiteLlmService } from "../src/services/litellm-service.js";
+import { SnifoxService } from "../src/services/snifox-service.js";
 
-describe("LiteLlmService", () => {
+describe("SnifoxService", () => {
   const logger = pino({ level: "silent" });
   const filesCreate = vi.fn();
   const chatCreate = vi.fn();
-  const tempDir = path.join(process.env.APP_STORAGE_ROOT || process.cwd(), "litellm-service-test");
+  const tempDir = path.join(process.env.APP_STORAGE_ROOT || process.cwd(), "snifox-service-test");
   const tempVideoPath = path.join(tempDir, "source.mp4");
 
-  const service = new LiteLlmService("https://core.snifoxai.com/v1", "snfx-test", logger, {
+  const service = new SnifoxService("https://core.snifoxai.com/v1", "snfx-test", logger, {
     files: {
       create: filesCreate
     },
@@ -31,7 +31,7 @@ describe("LiteLlmService", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("uploads video with LiteLLM target model metadata", async () => {
+  it("uploads video with SnifoxAI target model metadata", async () => {
     await mkdir(tempDir, { recursive: true });
     await writeFile(tempVideoPath, "fake-video", "utf8");
     filesCreate.mockResolvedValue({
@@ -77,12 +77,75 @@ describe("LiteLlmService", () => {
     expect(file.inlineDataBase64).toBeUndefined();
   });
 
+  it("uses prepared analysis video when source needs compression", async () => {
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(tempVideoPath, "fake-video", "utf8");
+    const analysisVideoPath = path.join(tempDir, "_analysis", "source-snifox-analysis.mp4");
+    await mkdir(path.dirname(analysisVideoPath), { recursive: true });
+    await writeFile(analysisVideoPath, "small-video", "utf8");
+    filesCreate.mockResolvedValue({
+      id: "file-small-video",
+      filename: "source-snifox-analysis.mp4"
+    });
+    const compressionAwareService = new SnifoxService(
+      "https://core.snifoxai.com/v1",
+      "snfx-test",
+      logger,
+      {
+        files: {
+          create: filesCreate
+        },
+        chat: {
+          completions: {
+            create: chatCreate
+          }
+        }
+      },
+      async () => ({
+        filePath: analysisVideoPath,
+        mimeType: "video/mp4",
+        originalBytes: 40 * 1024 * 1024,
+        uploadBytes: 1024,
+        compressed: true
+      })
+    );
+
+    const file = await compressionAwareService.uploadVideo(
+      tempVideoPath,
+      "video/mp4",
+      "google/gemini-3-flash-preview"
+    );
+
+    expect(file.fileId).toBe("file-small-video");
+    const uploadInput = filesCreate.mock.calls[0]?.[0] as { file?: { path?: string } };
+    expect(uploadInput.file?.path).toBe(analysisVideoPath);
+  });
+
+  it("falls back to text-only mode when upload is still too large", async () => {
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(tempVideoPath, "fake-video", "utf8");
+    filesCreate.mockRejectedValue({
+      status: 413,
+      message: "413 Request Entity Too Large"
+    });
+
+    const file = await service.uploadVideo(
+      tempVideoPath,
+      "video/mp4",
+      "google/gemini-3-flash-preview"
+    );
+
+    expect(file.fileId).toBeUndefined();
+    expect(file.filename).toBe("source.mp4");
+    expect(file.mimeType).toBe("video/mp4");
+  });
+
   it("reuses uploaded file id for script generation", async () => {
     chatCreate.mockResolvedValue({
       choices: [
         {
           message: {
-            content: "Naskah LiteLLM final."
+            content: "Naskah SnifoxAI final."
           }
         }
       ]
@@ -98,7 +161,7 @@ describe("LiteLlmService", () => {
       }
     });
 
-    expect(script).toBe("Naskah LiteLLM final.");
+    expect(script).toBe("Naskah SnifoxAI final.");
     expect(chatCreate).toHaveBeenCalledTimes(1);
     expect(chatCreate.mock.calls[0]?.[0]).toMatchObject({
       model: "google/gemini-3-flash-preview"
@@ -110,7 +173,7 @@ describe("LiteLlmService", () => {
     });
   });
 
-  it("falls back to a text-only model when LiteLLM cannot use the uploaded video", async () => {
+  it("falls back to a text-only model when SnifoxAI cannot use the uploaded video", async () => {
     chatCreate
       .mockRejectedValueOnce({
         status: 404,
@@ -156,12 +219,12 @@ describe("LiteLlmService", () => {
       ]
     });
     expect(chatCreate.mock.calls[2]?.[0]).toMatchObject({
-      model: "openai/gpt-5-mini",
+      model: "anthropic/claude-sonnet-4.5",
       messages: [{ role: "user", content: "Analisis video inline ini" }]
     });
   });
 
-  it("adds a helpful message when LiteLLM cannot find a model", async () => {
+  it("adds a helpful message when SnifoxAI cannot find a model", async () => {
     chatCreate.mockRejectedValue({
       status: 404,
       message: "404 status code (no body)"
@@ -177,7 +240,7 @@ describe("LiteLlmService", () => {
           inlineDataBase64: Buffer.from("inline-video").toString("base64")
         }
       })
-    ).rejects.toThrow(/openai\/gpt-5-mini|endpoint \/models/i);
+    ).rejects.toThrow(/google\/gemini-3-flash-preview|endpoint \/models/i);
   });
 
   it("requests json_object response format for social metadata", async () => {
@@ -239,7 +302,7 @@ describe("LiteLlmService", () => {
       hashtags: ["#fallback"]
     });
     expect(chatCreate.mock.calls[1]?.[0]).toMatchObject({
-      model: "openai/gpt-5-mini"
+      model: "anthropic/claude-sonnet-4.5"
     });
   });
 

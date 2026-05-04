@@ -556,7 +556,7 @@ export class JobProcessor implements IJobProcessor {
 
   private toErrorMessage(error: unknown): string {
     if (isRateLimitError(error)) {
-      return `${buildRateLimitErrorMessage(error)} Cek quota/key LiteLLM Anda atau tunggu reset limit.`;
+      return `${buildRateLimitErrorMessage(error)} Cek quota/key SnifoxAI Anda atau tunggu reset limit.`;
     }
     return extractErrorMessage(error);
   }

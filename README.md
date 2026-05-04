@@ -1,4 +1,4 @@
-# Auto Voice Over + Caption (LiteLLM + Gemini)
+# Auto Voice Over + Caption (Snifox Gateway + Gemini)
 
 Aplikasi untuk otomatisasi:
 - input: `video + judul + deskripsi + affiliate link`
@@ -8,7 +8,7 @@ Aplikasi untuk otomatisasi:
 ## Stack
 - Frontend: React + Vite + TypeScript
 - Backend: Fastify + TypeScript
-- AI: LiteLLM gateway untuk script/caption + Gemini native untuk TTS voice-over, dengan fallback otomatis ke model text-only lain di LiteLLM dan voice Windows lokal saat provider utama gagal
+- AI: Snifox gateway (OpenAI-compatible) untuk script/caption + Gemini native untuk TTS voice-over, dengan fallback otomatis ke model text-only lain di gateway dan voice Windows lokal saat provider utama gagal
 - Media: `ffmpeg-static` + `ffprobe-static` (tanpa install FFmpeg global)
 - Runtime aplikasi: Node.js (Python tidak dipakai untuk runtime aplikasi ini)
 
@@ -29,10 +29,7 @@ npm install
 ```bash
 copy .env.example .env
 ```
-3. Isi `LITELLM_API_BASE`, `LITELLM_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
-
-Catatan kompatibilitas:
-- Nama env lama `SNIFOX_API_BASE` dan `SNIFOX_API_KEY` masih didukung sebagai fallback agar migrasi dari setup lama tetap aman, tetapi project ini sekarang didokumentasikan sebagai integrasi LiteLLM.
+3. Isi `SNIFOX_API_BASE`, `SNIFOX_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
 
 ## Menjalankan (dev)
 ```bash
@@ -50,12 +47,16 @@ Alternatif (Windows launcher):
 
 ## Menjalankan Dev Dari Laptop + Android (LAN)
 1. Cari IP laptop di jaringan Wi-Fi yang sama (contoh `192.168.1.20`).
-2. Set `WEB_ORIGIN` di `.env`, contoh:
+2. Default `.env` di repo ini cukup:
+```env
+WEB_ORIGIN=http://localhost:5173
+```
+3. Jika ingin diakses dari Android/LAN, tambahkan origin browser HP juga, contoh:
 ```env
 WEB_ORIGIN=http://localhost:5173,http://192.168.1.20:5173
 ```
-3. Jalankan `npm run dev`.
-4. Buka dari HP Android (Chrome): `http://192.168.1.20:5173`.
+4. Jalankan `npm run dev`.
+5. Buka dari HP Android (Chrome): `http://192.168.1.20:5173`.
 
 Catatan:
 - Vite dev server sudah listen ke `0.0.0.0` agar bisa diakses dari perangkat LAN.
@@ -71,8 +72,8 @@ npm run start
 1. Upload source project (tanpa folder cache lokal seperti `node_modules`).
 2. Buat `.env` di server:
 ```env
-LITELLM_API_BASE=http://localhost:4000/v1
-LITELLM_API_KEY=sk-your-litellm-key
+SNIFOX_API_BASE=https://core.snifoxai.com/v1
+SNIFOX_API_KEY=snfx-your-api-key
 GEMINI_TTS_API_KEY=...
 PORT=<port_dari_cpanel>
 WEB_ORIGIN=https://domain-anda
@@ -114,13 +115,13 @@ npm run start
 - Output file di tab `Jobs` tersedia sebagai link langsung (browser-friendly untuk desktop dan Android).
 - Form `Generate` menyediakan kotak `Affiliate Link`.
 - Tab `Jobs` menampilkan caption final siap copy (caption + hashtag + affiliate link job).
-- `scriptModel` harus memakai ID model lengkap yang aktif di gateway LiteLLM. Cek `GET /models`; contoh yang aktif saat ini: `openai/gpt-5-mini`.
+- `scriptModel` harus memakai ID model SnifoxAI lengkap yang aktif di gateway. Contoh default project ini: `google/gemini-3-flash-preview`.
 - `ttsModel` tetap model Gemini direct untuk voice-over, contoh `gemini-2.5-flash-preview-tts`.
-- Jika model utama sedang gagal atau unavailable di LiteLLM, server otomatis fallback ke model text-only lain yang masih tersedia agar caption/script tetap jalan.
+- Jika model utama sedang gagal atau unavailable di gateway, server otomatis fallback ke model text-only lain yang masih tersedia agar caption/script tetap jalan.
 - Jika Gemini TTS mengembalikan `403 PERMISSION_DENIED` atau gagal di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.
-- `LITELLM_API_BASE` harus menunjuk ke endpoint OpenAI-compatible LiteLLM, biasanya berakhiran `/v1`.
-- Daftar model aktif bisa dicek lewat endpoint `GET /models` pada gateway LiteLLM Anda.
-- Dokumentasi resmi LiteLLM: `https://docs.litellm.ai/`
+- `SNIFOX_API_BASE` harus menunjuk ke endpoint OpenAI-compatible yang aktif, dan env repo ini saat ini memakai `https://core.snifoxai.com/v1`.
+- Daftar model aktif bisa dicek lewat endpoint `GET /models` pada gateway Anda.
+- Dokumentasi gateway default repo ini: `https://snifoxai.com/docs`
 
 ## Testing
 ```bash

@@ -6,20 +6,20 @@ import { DEFAULT_PORT } from "./constants.js";
 dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 
 export interface AppEnv {
-  llmApiBase: string;
-  llmApiKey: string;
+  snifoxApiBase: string;
+  snifoxApiKey: string;
   geminiTtsApiKey: string;
   port: number;
   webOrigins: string[];
 }
 
-function normalizeLiteLlmBase(input: string): string {
+function normalizeSnifoxBase(input: string): string {
   let url: URL;
   try {
     url = new URL(input);
   } catch {
     throw new Error(
-      "LITELLM_API_BASE tidak valid. Gunakan URL penuh ke gateway LiteLLM, contoh: http://localhost:4000/v1"
+      "SNIFOX_API_BASE tidak valid. Gunakan URL penuh, contoh: https://core.snifoxai.com/v1"
     );
   }
 
@@ -31,10 +31,8 @@ function normalizeLiteLlmBase(input: string): string {
 }
 
 export function loadEnv(): AppEnv {
-  const llmApiBaseRaw =
-    process.env.LITELLM_API_BASE?.trim() ?? process.env.SNIFOX_API_BASE?.trim() ?? "";
-  const llmApiKey =
-    process.env.LITELLM_API_KEY?.trim() ?? process.env.SNIFOX_API_KEY?.trim() ?? "";
+  const snifoxApiBaseRaw = process.env.SNIFOX_API_BASE?.trim() ?? "";
+  const snifoxApiKey = process.env.SNIFOX_API_KEY?.trim() ?? "";
   const geminiTtsApiKey =
     process.env.GEMINI_TTS_API_KEY?.trim() ?? process.env.GEMINI_API_KEY?.trim() ?? "";
   const portRaw = process.env.PORT?.trim();
@@ -44,15 +42,15 @@ export function loadEnv(): AppEnv {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
-  if (!llmApiBaseRaw) {
+  if (!snifoxApiBaseRaw) {
     throw new Error(
-      "LITELLM_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example. Alias lama SNIFOX_API_BASE masih didukung."
+      "SNIFOX_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example."
     );
   }
 
-  if (!llmApiKey) {
+  if (!snifoxApiKey) {
     throw new Error(
-      "LITELLM_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example. Alias lama SNIFOX_API_KEY masih didukung."
+      "SNIFOX_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example."
     );
   }
 
@@ -73,8 +71,8 @@ export function loadEnv(): AppEnv {
   }
 
   return {
-    llmApiBase: normalizeLiteLlmBase(llmApiBaseRaw),
-    llmApiKey,
+    snifoxApiBase: normalizeSnifoxBase(snifoxApiBaseRaw),
+    snifoxApiKey,
     geminiTtsApiKey,
     port,
     webOrigins

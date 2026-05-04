@@ -1,5 +1,47 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, stat } from "node:fs/promises";
+import path from "node:path";
+import ffmpegPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+
+const MAX_MODEL_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+interface AnalysisVideoVariant {
+  crf: number;
+  fps: number;
+  scale: string;
+}
+
+const ANALYSIS_VIDEO_VARIANTS: AnalysisVideoVariant[] = [
+  { crf: 35, fps: 2, scale: "360:-2" },
+  { crf: 38, fps: 1, scale: "288:-2" },
+  { crf: 40, fps: 1, scale: "240:-2" }
+];
+
+export interface PreparedModelVideo {
+  filePath: string;
+  mimeType: string;
+  originalBytes: number;
+  uploadBytes: number;
+  compressed: boolean;
+}
+
+function resolveFfmpegExecutable(): string {
+  const fromEnv = process.env.FFMPEG_PATH?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const fromPackage = (ffmpegPath as unknown as string | null) ?? null;
+  if (fromPackage && existsSync(fromPackage)) {
+    return fromPackage;
+  }
+
+  return "ffmpeg";
+}
+
+const FFMPEG_EXEC = resolveFfmpegExecutable();
 
 export async function probeVideoDuration(filePath: string): Promise<number> {
   const ffprobePath = (ffprobeStatic as { path?: string }).path;
@@ -42,4 +84,111 @@ export async function probeVideoDuration(filePath: string): Promise<number> {
       resolve(duration);
     });
   });
+}
+
+async function runFfmpeg(args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(FFMPEG_EXEC, args, { windowsHide: true });
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += String(chunk);
+    });
+    proc.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        reject(
+          new Error(
+            `ffmpeg tidak ditemukan (${FFMPEG_EXEC}). Jalankan 'npm rebuild ffmpeg-static' atau set env FFMPEG_PATH ke lokasi ffmpeg.exe.`
+          )
+        );
+        return;
+      }
+      reject(error);
+    });
+    proc.once("close", (code: number | null) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg gagal membuat video analisis: ${stderr || code}`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function analysisVideoPathFor(filePath: string): string {
+  const parsed = path.parse(filePath);
+  return path.join(path.dirname(filePath), "_analysis", `${parsed.name}-snifox-analysis.mp4`);
+}
+
+async function transcodeAnalysisVideo(
+  sourcePath: string,
+  outputPath: string,
+  variant: AnalysisVideoVariant
+): Promise<number> {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await runFfmpeg([
+    "-y",
+    "-i",
+    sourcePath,
+    "-vf",
+    `fps=${variant.fps},scale=${variant.scale}`,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    String(variant.crf),
+    "-movflags",
+    "+faststart",
+    outputPath
+  ]);
+  return (await stat(outputPath)).size;
+}
+
+export async function prepareVideoForModelUpload(
+  filePath: string,
+  mimeType: string
+): Promise<PreparedModelVideo> {
+  const originalBytes = (await stat(filePath)).size;
+  if (originalBytes <= MAX_MODEL_UPLOAD_BYTES) {
+    return {
+      filePath,
+      mimeType,
+      originalBytes,
+      uploadBytes: originalBytes,
+      compressed: false
+    };
+  }
+
+  const outputPath = analysisVideoPathFor(filePath);
+  try {
+    const existingBytes = (await stat(outputPath)).size;
+    if (existingBytes > 0 && existingBytes <= MAX_MODEL_UPLOAD_BYTES) {
+      return {
+        filePath: outputPath,
+        mimeType: "video/mp4",
+        originalBytes,
+        uploadBytes: existingBytes,
+        compressed: true
+      };
+    }
+  } catch {
+    // Tidak ada cache video analisis; buat baru di bawah.
+  }
+
+  let uploadBytes = 0;
+  for (const variant of ANALYSIS_VIDEO_VARIANTS) {
+    uploadBytes = await transcodeAnalysisVideo(filePath, outputPath, variant);
+    if (uploadBytes <= MAX_MODEL_UPLOAD_BYTES) {
+      break;
+    }
+  }
+
+  return {
+    filePath: outputPath,
+    mimeType: "video/mp4",
+    originalBytes,
+    uploadBytes,
+    compressed: true
+  };
 }

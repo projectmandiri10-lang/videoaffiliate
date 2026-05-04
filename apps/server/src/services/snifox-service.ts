@@ -20,6 +20,10 @@ import {
   extractScriptText
 } from "../utils/model-output.js";
 import { withRetry } from "../utils/retry.js";
+import {
+  prepareVideoForModelUpload,
+  type PreparedModelVideo
+} from "../utils/video.js";
 import { buildReelsMetadataPrompt } from "./prompt-builder.js";
 
 interface OpenAiLikeClient {
@@ -34,21 +38,22 @@ interface OpenAiLikeClient {
 }
 
 const TEXT_MODEL_FALLBACKS = [
-  "openai/gpt-5-mini",
-  "openai/gpt-5-nano",
-  "minimax/minimax-m2.7",
+  "google/gemini-3-flash-preview",
   "anthropic/claude-sonnet-4.5",
   "anthropic/claude-opus-4.6"
 ];
 
-export class LiteLlmService implements AIService {
+type VideoUploadPreparer = (filePath: string, mimeType: string) => Promise<PreparedModelVideo>;
+
+export class SnifoxService implements AIService {
   private readonly client: OpenAiLikeClient;
 
   public constructor(
     apiBase: string,
     apiKey: string,
     private readonly logger: FastifyBaseLogger,
-    client?: OpenAiLikeClient
+    client?: OpenAiLikeClient,
+    private readonly prepareUploadVideo: VideoUploadPreparer = prepareVideoForModelUpload
   ) {
     this.client =
       client ??
@@ -64,13 +69,26 @@ export class LiteLlmService implements AIService {
     mimeType: string,
     targetModel: string
   ): Promise<UploadedModelFile> {
+    let prepared: PreparedModelVideo;
     try {
+      prepared = await this.prepareUploadVideo(filePath, mimeType);
+      if (prepared.compressed) {
+        this.logger.info(
+          {
+            sourceBytes: prepared.originalBytes,
+            uploadBytes: prepared.uploadBytes,
+            filePath: prepared.filePath
+          },
+          "Video source terlalu besar untuk gateway, memakai versi analisis kecil untuk SnifoxAI."
+        );
+      }
+
       const uploaded = await withRetry(
         async () =>
           this.client.files.create({
-            file: createReadStream(filePath),
+            file: createReadStream(prepared.filePath),
             purpose: "user_data",
-            // LiteLLM gateway accepts provider-routing metadata on /v1/files.
+            // SnifoxAI gateway accepts provider-routing metadata on /v1/files.
             target_model_names: targetModel
           }),
         {
@@ -83,22 +101,22 @@ export class LiteLlmService implements AIService {
       );
 
       if (!uploaded?.id) {
-        throw new Error("Upload video ke LiteLLM gagal: file_id tidak tersedia.");
+        throw new Error("Upload video ke SnifoxAI gagal: file_id tidak tersedia.");
       }
 
       return {
         fileId: uploaded.id,
-        filename: uploaded.filename || path.basename(filePath),
-        mimeType
+        filename: uploaded.filename || path.basename(prepared.filePath),
+        mimeType: prepared.mimeType
       };
     } catch (error) {
-      if (!this.isFilesEndpointUnavailable(error)) {
+      if (!this.canFallbackToTextOnly(error)) {
         throw error;
       }
 
       this.logger.warn(
         { err: error, filePath },
-        "LiteLLM tidak menyediakan /v1/files, lanjutkan dengan fallback script text-only."
+        "Video tidak bisa diunggah ke SnifoxAI, lanjutkan dengan fallback script text-only."
       );
 
       return {
@@ -126,7 +144,7 @@ export class LiteLlmService implements AIService {
 
           this.logger.warn(
             { model: input.model },
-            "Script multimodal kosong dari LiteLLM, mencoba prompt berikutnya."
+            "Script multimodal kosong dari SnifoxAI, mencoba prompt berikutnya."
           );
         } catch (error) {
           lastError = error;
@@ -136,7 +154,7 @@ export class LiteLlmService implements AIService {
 
           this.logger.warn(
             { err: error, model: input.model },
-            "Script multimodal LiteLLM gagal, fallback ke model text-only."
+            "Script multimodal SnifoxAI gagal, fallback ke model text-only."
           );
           break;
         }
@@ -144,7 +162,7 @@ export class LiteLlmService implements AIService {
     } else {
       this.logger.warn(
         { model: input.model },
-        "Video tidak bisa dipakai di LiteLLM, fallback ke generate script text-only."
+        "Video tidak bisa dipakai di SnifoxAI, fallback ke generate script text-only."
       );
     }
 
@@ -177,7 +195,7 @@ export class LiteLlmService implements AIService {
         if (model !== input.model) {
           this.logger.warn(
             { requestedModel: input.model, fallbackModel: model },
-            "Caption/hashtags dipindah ke model fallback LiteLLM."
+            "Caption/hashtags dipindah ke model fallback SnifoxAI."
           );
         }
 
@@ -195,7 +213,7 @@ export class LiteLlmService implements AIService {
       }
     }
 
-    throw lastError ?? new Error("LiteLLM gagal membuat caption dan hashtags.");
+    throw lastError ?? new Error("SnifoxAI gagal membuat caption dan hashtags.");
   }
 
   private async generateScriptTextOnly(
@@ -214,7 +232,7 @@ export class LiteLlmService implements AIService {
           if (!script) {
             this.logger.warn(
               { model },
-              "Script text-only kosong dari LiteLLM, mencoba prompt atau model berikutnya."
+              "Script text-only kosong dari SnifoxAI, mencoba prompt atau model berikutnya."
             );
             continue;
           }
@@ -222,7 +240,7 @@ export class LiteLlmService implements AIService {
           if (model !== preferredModel) {
             this.logger.warn(
               { requestedModel: preferredModel, fallbackModel: model },
-              "Script dipindah ke model fallback LiteLLM."
+              "Script dipindah ke model fallback SnifoxAI."
             );
           }
 
@@ -241,7 +259,7 @@ export class LiteLlmService implements AIService {
       }
     }
 
-    throw lastError ?? new Error("LiteLLM mengembalikan script kosong.");
+    throw lastError ?? new Error("SnifoxAI mengembalikan script kosong.");
   }
 
   private buildPromptVariants(prompt: string): string[] {
@@ -275,7 +293,7 @@ export class LiteLlmService implements AIService {
               ...(file.fileId ? { file_id: file.fileId } : {}),
               ...(file.inlineDataBase64 ? { file_data: file.inlineDataBase64 } : {}),
               filename: file.filename,
-              // LiteLLM accepts Gemini format hints for uploaded files.
+              // SnifoxAI accepts Gemini format hints for uploaded files.
               format: file.mimeType
             }
           }
@@ -302,11 +320,11 @@ export class LiteLlmService implements AIService {
         const lowerMessage = message.toLowerCase();
         if (lowerMessage.includes("currently unavailable")) {
           throw new Error(
-            `${message}. Model LiteLLM ini sedang tidak tersedia di gateway. Ganti scriptModel ke model aktif dari endpoint /models, misalnya openai/gpt-5-mini.`
+            `${message}. Model SnifoxAI ini sedang tidak tersedia di gateway. Ganti scriptModel ke model aktif dari endpoint /models, misalnya google/gemini-3-flash-preview.`
           );
         }
         throw new Error(
-          `${message}. Pastikan model LiteLLM tersedia di endpoint /models dan memakai ID lengkap, misalnya openai/gpt-5-mini.`
+          `${message}. Pastikan model SnifoxAI tersedia di endpoint /models dan memakai ID lengkap, misalnya google/gemini-3-flash-preview.`
         );
       }
       throw error;
@@ -322,6 +340,22 @@ export class LiteLlmService implements AIService {
         message.includes("cannot post /v1/files") ||
         message.includes("not found"))
     );
+  }
+
+  private isPayloadTooLarge(error: unknown): boolean {
+    const statusCode = extractStatusCode(error);
+    const message = extractErrorMessage(error).toLowerCase();
+    return (
+      statusCode === 413 ||
+      message.includes("request entity too large") ||
+      message.includes("payload too large") ||
+      message.includes("entity too large") ||
+      message.includes("content too large")
+    );
+  }
+
+  private canFallbackToTextOnly(error: unknown): boolean {
+    return this.isFilesEndpointUnavailable(error) || this.isPayloadTooLarge(error);
   }
 
   private shouldTryAlternativeModel(error: unknown): boolean {
