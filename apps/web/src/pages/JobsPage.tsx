@@ -432,44 +432,82 @@ export function JobsPage({
   const canDeleteSelected = selected ? isJobDeletable(selected) : false;
 
   return (
-    <section className="card split-layout">
-      <div className="jobs-sidebar">
-        <div className="section-card">
-          <div className="row-head">
-            <h2>Jobs</h2>
-            <div className="form-actions">
-              <button type="button" onClick={openCreatePanel}>
-                Job Baru
-              </button>
-              <button type="button" onClick={() => void refreshJobs(selectedJobId)} disabled={jobsLoading}>
-                {jobsLoading ? "Refreshing..." : "Refresh"}
-              </button>
-            </div>
+    <section className="page-shell jobs-page">
+      <aside className="jobs-sidebar glass-panel">
+        <div className="page-kicker">
+          <i className="ti ti-layout-grid" />
+          <span>Jobs</span>
+        </div>
+        <div className="jobs-sidebar__head">
+          <div>
+            <p className="eyebrow">Control Room</p>
+            <h2>Jobs Dashboard</h2>
+            <p className="section-note">
+              Pantau antrean, output, dan retry tiap platform tanpa mengubah file hasil yang sudah
+              ada.
+            </p>
           </div>
-          <div className="job-list">
-            {jobs.map((job) => (
-              <button
-                key={job.jobId}
-                className={`job-item ${job.jobId === selected?.jobId ? "active" : ""}`}
-                onClick={() => {
-                  setSelectedJobId(job.jobId);
-                  resetEditForm(job);
-                  setPanelMode("view");
-                }}
-              >
-                <div className="break-anywhere">{job.title}</div>
-                <div className="small break-anywhere">#{job.jobId}</div>
-                <StatusBadge status={job.overallStatus} />
-              </button>
-            ))}
-            {!jobs.length && <p>Belum ada job. Klik `Job Baru` untuk membuat data pertama.</p>}
+          <div className="form-actions">
+            <button type="button" className="secondary-button" onClick={openCreatePanel}>
+              Job Baru
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void refreshJobs(selectedJobId)}
+              disabled={jobsLoading}
+            >
+              {jobsLoading ? "Refreshing..." : "Refresh"}
+            </button>
           </div>
         </div>
-      </div>
 
-      <div>
-        <div className="job-toolbar">
+        <div className="jobs-stat-grid">
+          <div className="meta-card">
+            <strong>Total Jobs</strong>
+            <div>{jobs.length}</div>
+          </div>
+          <div className="meta-card">
+            <strong>Running</strong>
+            <div>{jobs.filter((job) => job.overallStatus === "running").length}</div>
+          </div>
+        </div>
+
+        <div className="job-list">
+          {jobs.map((job) => (
+            <button
+              key={job.jobId}
+              className={`job-item ${job.jobId === selected?.jobId ? "active" : ""}`}
+              onClick={() => {
+                setSelectedJobId(job.jobId);
+                resetEditForm(job);
+                setPanelMode("view");
+              }}
+            >
+              <div className="job-item__row">
+                <strong className="break-anywhere">{job.title}</strong>
+                <StatusBadge status={job.overallStatus} />
+              </div>
+              <div className="small break-anywhere">#{job.jobId}</div>
+              <div className="job-item__meta">
+                <span>{job.platforms.length} platform</span>
+                <span>{job.videoDurationSec.toFixed(1)} detik</span>
+              </div>
+            </button>
+          ))}
+          {!jobs.length && (
+            <div className="empty-state">
+              <i className="ti ti-clock-question" aria-hidden="true" />
+              <p>Belum ada job. Klik `Job Baru` untuk membuat data pertama.</p>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <div className="jobs-main">
+        <div className="job-toolbar glass-panel">
           <div>
+            <p className="eyebrow">Workspace</p>
             <h3>
               {panelMode === "create"
                 ? "Buat Job Baru"
@@ -487,12 +525,12 @@ export function JobsPage({
           </div>
           <div className="form-actions">
             {panelMode !== "create" && (
-              <button type="button" onClick={openCreatePanel}>
+              <button type="button" className="secondary-button" onClick={openCreatePanel}>
                 Job Baru
               </button>
             )}
             {panelMode === "view" && selected && canEditSelected && (
-              <button type="button" onClick={openEditPanel}>
+              <button type="button" className="secondary-button" onClick={openEditPanel}>
                 Edit Job
               </button>
             )}
@@ -507,7 +545,7 @@ export function JobsPage({
               </button>
             )}
             {panelMode !== "view" && (
-              <button type="button" onClick={closePanel}>
+              <button type="button" className="secondary-button" onClick={closePanel}>
                 Tutup Panel
               </button>
             )}
@@ -515,7 +553,7 @@ export function JobsPage({
         </div>
 
         {jobCreationState?.phase === "uploading" && (
-          <div className="progress-panel">
+          <div className="progress-panel glass-panel">
             <div className="progress-head">
               <div>
                 <strong>Mengirim Job Baru</strong>
@@ -539,7 +577,7 @@ export function JobsPage({
         )}
 
         {panelMode === "view" && selected && selectedProgress?.isAnimated && (
-          <div className="progress-panel">
+          <div className="progress-panel glass-panel">
             <div className="progress-head">
               <div>
                 <strong>Progress Job Aktif</strong>
@@ -565,10 +603,10 @@ export function JobsPage({
         )}
 
         {panelMode === "create" && (
-          <div className="section-card">
+          <div className="section-card glass-panel">
             <form onSubmit={onCreate} className="grid-form">
-              <label>
-                Video
+              <label className="form-field">
+                <span className="field-kicker">Video</span>
                 <input
                   key={createFileInputKey}
                   type="file"
@@ -582,8 +620,8 @@ export function JobsPage({
                   disabled={creating}
                 />
               </label>
-              <label>
-                Judul
+              <label className="form-field">
+                <span className="field-kicker">Judul</span>
                 <input
                   value={createForm.title}
                   onChange={(event) =>
@@ -595,8 +633,8 @@ export function JobsPage({
                   disabled={creating}
                 />
               </label>
-              <label>
-                Deskripsi
+              <label className="form-field">
+                <span className="field-kicker">Deskripsi</span>
                 <textarea
                   value={createForm.description}
                   onChange={(event) =>
@@ -608,8 +646,8 @@ export function JobsPage({
                   disabled={creating}
                 />
               </label>
-              <label>
-                Affiliate Link
+              <label className="form-field">
+                <span className="field-kicker">Affiliate Link</span>
                 <input
                   value={createForm.affiliateLink}
                   onChange={(event) =>
@@ -622,10 +660,15 @@ export function JobsPage({
                 />
               </label>
               <div className="form-actions">
-                <button type="submit" disabled={creating}>
+                <button type="submit" className="primary-button" disabled={creating}>
                   {creating ? "Membuat..." : "Generate All Platforms"}
                 </button>
-                <button type="button" onClick={() => resetCreateForm()} disabled={creating}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => resetCreateForm()}
+                  disabled={creating}
+                >
                   Reset
                 </button>
               </div>
@@ -634,7 +677,7 @@ export function JobsPage({
         )}
 
         {panelMode === "edit" && selected && (
-          <div className="section-card">
+          <div className="section-card glass-panel">
             <div className="meta-grid">
               <div className="meta-card">
                 <strong>Job ID</strong>
@@ -661,8 +704,8 @@ export function JobsPage({
 
             {canEditSelected && (
               <form onSubmit={onSave} className="grid-form">
-                <label>
-                  Judul
+                <label className="form-field">
+                  <span className="field-kicker">Judul</span>
                   <input
                     value={editForm.title}
                     onChange={(event) =>
@@ -674,8 +717,8 @@ export function JobsPage({
                     disabled={saving}
                   />
                 </label>
-                <label>
-                  Deskripsi
+                <label className="form-field">
+                  <span className="field-kicker">Deskripsi</span>
                   <textarea
                     value={editForm.description}
                     onChange={(event) =>
@@ -687,8 +730,8 @@ export function JobsPage({
                     disabled={saving}
                   />
                 </label>
-                <label>
-                  Affiliate Link
+                <label className="form-field">
+                  <span className="field-kicker">Affiliate Link</span>
                   <input
                     value={editForm.affiliateLink}
                     onChange={(event) =>
@@ -701,10 +744,15 @@ export function JobsPage({
                   />
                 </label>
                 <div className="form-actions">
-                  <button type="submit" disabled={saving}>
+                  <button type="submit" className="primary-button" disabled={saving}>
                     {saving ? "Menyimpan..." : "Simpan Perubahan"}
                   </button>
-                  <button type="button" onClick={() => resetEditForm(selected)} disabled={saving}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => resetEditForm(selected)}
+                    disabled={saving}
+                  >
                     Reset Form
                   </button>
                 </div>
@@ -714,13 +762,16 @@ export function JobsPage({
         )}
 
         {panelMode === "view" && !selected && (
-          <div className="section-card">
-            <p>Belum ada job aktif untuk ditampilkan.</p>
+          <div className="section-card glass-panel">
+            <div className="empty-state">
+              <i className="ti ti-database-off" aria-hidden="true" />
+              <p>Belum ada job aktif untuk ditampilkan.</p>
+            </div>
           </div>
         )}
 
         {panelMode === "view" && selected && (
-          <div className="detail-box">
+          <div className="detail-box glass-panel">
             <div className="meta-grid">
               <div className="meta-card">
                 <strong>Judul</strong>
@@ -742,112 +793,104 @@ export function JobsPage({
               </div>
             </div>
 
-            <p>
-              <strong>Affiliate Link:</strong>{" "}
-              {selected.affiliateLink ? (
-                <span className="break-anywhere">{selected.affiliateLink}</span>
-              ) : (
-                <span className="small">Tidak tersedia</span>
-              )}
-            </p>
-
-            <div className="section-divider">
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Platform</th>
-                      <th>Status</th>
-                      <th>Output</th>
-                      <th>Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selected.platforms.map((platform) => {
-                      const outputLinks = getOutputLinks(platform);
-                      const retryCooldownMs = getRetryCooldownMs(platform.retryAfter, retryClockMs);
-                      const retryDisabled = retryCooldownMs > 0;
-                      return (
-                        <tr key={platform.platformId}>
-                          <td>{PLATFORM_LABEL[platform.platformId]}</td>
-                          <td>
-                            <StatusBadge status={platform.status} />
-                            {platform.errorMessage && (
-                              <div className="err-inline break-anywhere">
-                                {platform.errorMessage}
-                              </div>
-                            )}
-                          </td>
-                          <td>
-                            <div className="small">
-                              {outputLinks.length
-                                ? `Tersedia: ${outputLinks.map((item) => item.label).join(", ")}`
-                                : "Belum ada file output"}
-                            </div>
-                            {outputLinks.length > 0 && (
-                              <div className="output-links">
-                                {outputLinks.map((output) => (
-                                  <a
-                                    key={output.label}
-                                    href={output.href}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  >
-                                    {output.label}
-                                  </a>
-                                ))}
-                              </div>
-                            )}
-                            {(platform.captionText || platform.hashtags?.length) && (
-                              <div className="caption-box">
-                                {platform.captionText && (
-                                  <p className="break-anywhere">{platform.captionText}</p>
-                                )}
-                                {platform.hashtags?.length ? (
-                                  <p className="small break-anywhere">
-                                    {platform.hashtags.join(" ")}
-                                  </p>
-                                ) : null}
-                                {selected.affiliateLink && (
-                                  <p className="small break-anywhere">{selected.affiliateLink}</p>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void copyToClipboard(
-                                      composeCaptionForCopy(platform, selected.affiliateLink)
-                                    )
-                                  }
-                                >
-                                  Copy Caption
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                          <td>
-                            {(platform.status === "failed" || platform.status === "interrupted") && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => void onRetry(platform.platformId)}
-                                  disabled={retryDisabled}
-                                >
-                                  {retryDisabled
-                                    ? `Retry (${formatRetryCooldown(retryCooldownMs)})`
-                                    : "Retry"}
-                                </button>
-                                {retryDisabled && (
-                                  <div className="small">Retry tersedia lagi sebentar lagi.</div>
-                                )}
-                              </>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <div className="detail-summary">
+              <div className="detail-summary__copy">
+                <strong>Affiliate Link</strong>
+                {selected.affiliateLink ? (
+                  <span className="break-anywhere">{selected.affiliateLink}</span>
+                ) : (
+                  <span className="small">Tidak tersedia</span>
+                )}
               </div>
+            </div>
+
+            <div className="platform-run-list">
+              {selected.platforms.map((platform) => {
+                const outputLinks = getOutputLinks(platform);
+                const retryCooldownMs = getRetryCooldownMs(platform.retryAfter, retryClockMs);
+                const retryDisabled = retryCooldownMs > 0;
+                return (
+                  <article key={platform.platformId} className="platform-run-card">
+                    <div className="platform-run-card__head">
+                      <div>
+                        <h4>{PLATFORM_LABEL[platform.platformId]}</h4>
+                        <StatusBadge status={platform.status} />
+                      </div>
+                      {(platform.status === "failed" || platform.status === "interrupted") && (
+                        <div className="platform-run-card__actions">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => void onRetry(platform.platformId)}
+                            disabled={retryDisabled}
+                          >
+                            {retryDisabled
+                              ? `Retry (${formatRetryCooldown(retryCooldownMs)})`
+                              : "Retry"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {platform.errorMessage && (
+                      <div className="err-inline break-anywhere">{platform.errorMessage}</div>
+                    )}
+
+                    <div className="platform-run-card__body">
+                      <div>
+                        <p className="small">
+                          {outputLinks.length
+                            ? `Tersedia: ${outputLinks.map((item) => item.label).join(", ")}`
+                            : "Belum ada file output"}
+                        </p>
+                        {outputLinks.length > 0 && (
+                          <div className="output-links">
+                            {outputLinks.map((output) => (
+                              <a
+                                key={output.label}
+                                href={output.href}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {output.label}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {(platform.captionText || platform.hashtags?.length) && (
+                        <div className="caption-box">
+                          {platform.captionText && (
+                            <p className="break-anywhere">{platform.captionText}</p>
+                          )}
+                          {platform.hashtags?.length ? (
+                            <p className="small break-anywhere">{platform.hashtags.join(" ")}</p>
+                          ) : null}
+                          {selected.affiliateLink && (
+                            <p className="small break-anywhere">{selected.affiliateLink}</p>
+                          )}
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              void copyToClipboard(
+                                composeCaptionForCopy(platform, selected.affiliateLink)
+                              )
+                            }
+                          >
+                            Copy Caption
+                          </button>
+                        </div>
+                      )}
+
+                      {retryDisabled && (
+                        <div className="small">Retry tersedia lagi sebentar lagi.</div>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
         )}
