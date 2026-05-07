@@ -1,6 +1,19 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+const RETRYABLE_WRITE_ERROR_CODES = new Set(["EACCES", "EBUSY", "ENOTEMPTY", "EPERM"]);
+const WRITE_RETRY_DELAYS_MS = [50, 100, 250, 500, 1000];
+
+function getErrorCode(error: unknown): string | undefined {
+  return typeof (error as { code?: unknown })?.code === "string"
+    ? ((error as { code: string }).code)
+    : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class JsonFile<T> {
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -41,7 +54,7 @@ export class JsonFile<T> {
     await mkdir(directory, { recursive: true });
     try {
       await writeFile(tempPath, JSON.stringify(data, null, 2), "utf8");
-      await rename(tempPath, this.filePath);
+      await this.renameWithRetry(tempPath);
     } catch (error) {
       throw new Error(
         `Gagal menulis file ${this.filePath}: ${
@@ -50,6 +63,23 @@ export class JsonFile<T> {
       );
     } finally {
       await rm(tempPath, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private async renameWithRetry(tempPath: string): Promise<void> {
+    for (let attempt = 0; attempt <= WRITE_RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        await rename(tempPath, this.filePath);
+        return;
+      } catch (error) {
+        const code = getErrorCode(error);
+        const shouldRetry =
+          code && RETRYABLE_WRITE_ERROR_CODES.has(code) && attempt < WRITE_RETRY_DELAYS_MS.length;
+        if (!shouldRetry) {
+          throw error;
+        }
+        await delay(WRITE_RETRY_DELAYS_MS[attempt] ?? 0);
+      }
     }
   }
 
