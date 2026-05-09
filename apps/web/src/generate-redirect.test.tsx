@@ -11,7 +11,10 @@ vi.mock("./api", async () => {
     deleteJob: vi.fn(),
     fetchJobs: vi.fn(),
     retryPlatform: vi.fn(),
-    updateJob: vi.fn()
+    retryPlatformCaption: vi.fn(),
+    retryPlatformJob: vi.fn(),
+    updateJob: vi.fn(),
+    updatePlatformMetadata: vi.fn()
   };
 });
 

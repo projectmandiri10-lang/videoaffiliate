@@ -8,18 +8,31 @@ import type {
   JobRecord,
   PlatformId,
   PlatformRun,
+  RenderProfileId,
   SocialMetadata,
-  SpeechGenerator
+  SpeechGenerator,
+  VisualAuditStatus
 } from "../types.js";
-import { PLATFORM_LABELS } from "../platform-config.js";
+import { PLATFORM_CONFIG, PLATFORM_LABELS } from "../platform-config.js";
+import {
+  RENDERER_VERSION,
+  getRenderProfileIdForPlatform,
+  pickRenderVariantKey
+} from "../render-config.js";
 import { JobsStore } from "../stores/jobs-store.js";
 import { SettingsStore } from "../stores/settings-store.js";
 import { buildReelsMetadataPrompt, buildScriptPrompt } from "./prompt-builder.js";
 import { OUTPUTS_DIR, outputUrlToAbsolutePath } from "../utils/paths.js";
-import { combineVideoWithVoiceOver, writeWav24kMono } from "../utils/audio.js";
+import { writeWav24kMono } from "../utils/audio.js";
+import { renderPlatformVideo } from "../utils/render-video.js";
 import { formatCtaAsSentence } from "../utils/cta.js";
 import { ensureSocialMetadata } from "../utils/model-output.js";
 import { resolveVersionedBaseName } from "../utils/filename.js";
+import { writeCaptionArtifactForPlatform } from "../utils/caption-artifact.js";
+import { getEffectivePlatformMetadata } from "../utils/job-normalization.js";
+import { buildSrt } from "../utils/srt.js";
+import { probeVideoMetadata } from "../utils/video.js";
+import { compareVideoVisualDifference } from "../utils/visual-audit.js";
 import {
   buildRateLimitErrorMessage,
   extractErrorMessage,
@@ -30,6 +43,7 @@ import {
 interface QueueItem {
   jobId: string;
   platformIds?: PlatformId[];
+  forceFresh?: boolean;
 }
 
 interface SelectedCtaState {
@@ -40,6 +54,9 @@ interface SelectedCtaState {
 
 const DEFAULT_RETRY_COOLDOWN_MS = 10_000;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 15_000;
+const VISUAL_AUDIT_TIKTOK_MIN_SCORE = 5;
+const VISUAL_AUDIT_NON_TIKTOK_MIN_SCORE = 4;
+const VISUAL_AUDIT_REFERENCE_PLATFORM: PlatformId = "tiktok";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -109,6 +126,33 @@ function buildTtsCacheKey(input: {
   });
 }
 
+function buildRenderCacheKey(input: {
+  sourceVideoPath: string;
+  sourceDurationSec: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  sourceRotation: number;
+  scriptText: string;
+  title: string;
+  description: string;
+  ctaText: string;
+  renderProfileId: RenderProfileId;
+  renderVariantKey: string;
+  auditBoost: boolean;
+  rendererVersion: string;
+}): string {
+  return hashValue({
+    stage: "render",
+    ...input
+  });
+}
+
+interface VisualAuditResult {
+  status: VisualAuditStatus;
+  score?: number;
+  message?: string;
+}
+
 function buildRetryAfter(error: unknown): string {
   const cooldownMs = isRateLimitError(error)
     ? getRetryDelayMs(error, DEFAULT_RATE_LIMIT_COOLDOWN_MS)
@@ -118,6 +162,13 @@ function buildRetryAfter(error: unknown): string {
 
 function toOutputUrl(platformId: PlatformId, filename: string): string {
   return `/outputs/${platformId}/${encodeURIComponent(filename)}`;
+}
+
+function resolveOutputPath(outputUrl?: string): string | undefined {
+  if (!outputUrl) {
+    return undefined;
+  }
+  return outputUrlToAbsolutePath(outputUrl);
 }
 
 function listPlatformArtifactUrls(platform?: PlatformRun): string[] {
@@ -149,7 +200,8 @@ function listObsoletePlatformArtifactPaths(
 }
 
 export interface IJobProcessor {
-  enqueue(jobId: string, platformIds?: PlatformId[]): void;
+  enqueue(jobId: string, platformIds?: PlatformId[], options?: { forceFresh?: boolean }): void;
+  retryCaption?(jobId: string, platformId: PlatformId): Promise<JobRecord>;
 }
 
 export class JobProcessor implements IJobProcessor {
@@ -165,8 +217,8 @@ export class JobProcessor implements IJobProcessor {
     private readonly logger: FastifyBaseLogger
   ) {}
 
-  public enqueue(jobId: string, platformIds?: PlatformId[]): void {
-    this.queue.push({ jobId, platformIds });
+  public enqueue(jobId: string, platformIds?: PlatformId[], options?: { forceFresh?: boolean }): void {
+    this.queue.push({ jobId, platformIds, forceFresh: options?.forceFresh });
     void this.consume();
   }
 
@@ -177,6 +229,98 @@ export class JobProcessor implements IJobProcessor {
     await new Promise<void>((resolve) => {
       this.idleResolvers.push(resolve);
     });
+  }
+
+  public async retryCaption(jobId: string, platformId: PlatformId): Promise<JobRecord> {
+    const job = await this.jobsStore.getById(jobId);
+    if (!job) {
+      throw new Error("Job tidak ditemukan.");
+    }
+    if (job.overallStatus === "running") {
+      throw new Error("Retry Caption tidak bisa dilakukan saat job sedang running.");
+    }
+
+    const platform = job.platforms.find((item) => item.platformId === platformId);
+    if (!platform) {
+      throw new Error("Platform pada job tidak ditemukan.");
+    }
+    if (platform.status === "running") {
+      throw new Error("Retry Caption tidak bisa dilakukan saat platform sedang running.");
+    }
+    if (!platform.scriptText?.trim()) {
+      throw new Error("Retry Caption butuh script platform. Gunakan Retry Job terlebih dahulu.");
+    }
+
+    const settings = await this.settingsStore.get();
+    const selectedCta = await this.resolveSelectedCta(jobId, platformId, platform, settings);
+    const latestJob = (await this.jobsStore.getById(jobId)) ?? job;
+    const latestPlatform =
+      latestJob.platforms.find((item) => item.platformId === platformId) ?? platform;
+    const metadata = getEffectivePlatformMetadata(latestJob, latestPlatform);
+    const scriptText = latestPlatform.scriptText?.trim() || platform.scriptText.trim();
+    const fallbackSocial = {
+      caption: fallbackCaption(metadata.title, metadata.description, selectedCta.ctaText),
+      hashtags: fallbackHashtags(metadata.title, platformId)
+    };
+    const captionPrompt = buildReelsMetadataPrompt({
+      title: metadata.title,
+      description: metadata.description,
+      platformId,
+      scriptText,
+      ctaText: selectedCta.ctaText
+    });
+    const captionCacheKey = buildCaptionCacheKey(settings.scriptModel, captionPrompt);
+    const socialMetadata = await (async (): Promise<SocialMetadata> => {
+      try {
+        const candidate = await this.aiService.generateSocialMetadata({
+          model: settings.scriptModel,
+          title: metadata.title,
+          description: metadata.description,
+          platformId,
+          scriptText,
+          ctaText: selectedCta.ctaText
+        });
+        return ensureSocialMetadata(candidate, fallbackSocial.caption, fallbackSocial.hashtags);
+      } catch (error) {
+        this.logger.warn(
+          { err: error, jobId, platformId },
+          "Retry caption gagal di AI, pakai fallback."
+        );
+        return fallbackSocial;
+      }
+    })();
+
+    const updated = await this.jobsStore.update(jobId, (current) => ({
+      ...current,
+      updatedAt: nowIso(),
+      platforms: current.platforms.map<PlatformRun>((item) =>
+        item.platformId === platformId
+          ? {
+              ...item,
+              errorMessage: undefined,
+              retryAfter: undefined,
+              captionText: socialMetadata.caption,
+              hashtags: socialMetadata.hashtags,
+              captionCacheKey,
+              updatedAt: nowIso()
+            }
+          : item
+      )
+    }));
+
+    if (!updated) {
+      throw new Error("Job tidak ditemukan.");
+    }
+
+    const updatedPlatform = updated.platforms.find((item) => item.platformId === platformId);
+    if (updatedPlatform) {
+      await writeCaptionArtifactForPlatform(
+        updatedPlatform,
+        getEffectivePlatformMetadata(updated, updatedPlatform).affiliateLink
+      );
+    }
+
+    return updated;
   }
 
   private resolveIdle(): void {
@@ -230,6 +374,9 @@ export class JobProcessor implements IJobProcessor {
       if (!platformSettings?.enabled) {
         return false;
       }
+      if (item.forceFresh) {
+        return true;
+      }
       const previousPlatform = job.platforms.find((platform) => platform.platformId === platformId);
       return this.needsFreshScript(job, settings, platformId, previousPlatform);
     });
@@ -252,6 +399,20 @@ export class JobProcessor implements IJobProcessor {
         );
         return;
       }
+    }
+
+    let sourceVideoMetadata;
+    try {
+      sourceVideoMetadata = await probeVideoMetadata(job.videoPath);
+    } catch (error) {
+      const message = this.toErrorMessage(error);
+      await this.markPlatformsFailed(
+        item.jobId,
+        selectedPlatformIds,
+        message,
+        buildRetryAfter(error)
+      );
+      return;
     }
 
     for (const platformId of selectedPlatformIds) {
@@ -277,8 +438,26 @@ export class JobProcessor implements IJobProcessor {
       await this.updatePlatform(item.jobId, platformId, "running");
 
       const attemptOutputPaths: string[] = [];
+      const tempArtifactPaths: string[] = [];
       const previousPlatform = job.platforms.find((platform) => platform.platformId === platformId);
+      const metadata = getEffectivePlatformMetadata(job, previousPlatform);
       try {
+        const renderProfileId =
+          previousPlatform?.renderProfileId ?? getRenderProfileIdForPlatform(platformId);
+        const renderVariantKey =
+          previousPlatform?.renderVariantKey ??
+          pickRenderVariantKey(item.jobId, platformId, renderProfileId);
+        let auditBoost = Boolean(previousPlatform?.visualAuditBoosted);
+        if (
+          previousPlatform?.renderProfileId !== renderProfileId ||
+          previousPlatform?.renderVariantKey !== renderVariantKey
+        ) {
+          await this.patchPlatform(item.jobId, platformId, {
+            renderProfileId,
+            renderVariantKey
+          });
+        }
+
         const selectedCta = await this.resolveSelectedCta(
           item.jobId,
           platformId,
@@ -288,14 +467,16 @@ export class JobProcessor implements IJobProcessor {
         const scriptPrompt = buildScriptPrompt({
           settings,
           platformId,
-          title: job.title,
-          description: job.description,
+          title: metadata.title,
+          description: metadata.description,
           videoDurationSec: job.videoDurationSec,
           ctaText: selectedCta.ctaText
         });
         const scriptCacheKey = buildScriptCacheKey(settings.scriptModel, scriptPrompt);
         const cachedScriptText =
-          previousPlatform?.scriptCacheKey === scriptCacheKey ? previousPlatform.scriptText : undefined;
+          !item.forceFresh && previousPlatform?.scriptCacheKey === scriptCacheKey
+            ? previousPlatform.scriptText
+            : undefined;
         const scriptText =
           cachedScriptText ||
           (await this.aiService.generateScript({
@@ -318,31 +499,80 @@ export class JobProcessor implements IJobProcessor {
         const outputDir = path.join(OUTPUTS_DIR, platformId);
         await mkdir(outputDir, { recursive: true });
 
-        const baseName = await resolveVersionedBaseName({
-          directory: outputDir,
-          preferredBaseName: job.title,
-          suffixes: [".mp4", "-caption.txt", ".srt", ".txt"]
-        });
-        const mp4Filename = `${baseName}.mp4`;
-        const captionFilename = `${baseName}-caption.txt`;
+        const srtText = buildSrt(
+          scriptText,
+          job.videoDurationSec,
+          PLATFORM_CONFIG[platformId].srtStyle
+        );
+        const buildCurrentRenderCacheKey = (nextAuditBoost: boolean) =>
+          buildRenderCacheKey({
+            sourceVideoPath: job.videoPath,
+            sourceDurationSec: sourceVideoMetadata.durationSec,
+            sourceWidth: sourceVideoMetadata.displayWidth,
+            sourceHeight: sourceVideoMetadata.displayHeight,
+            sourceRotation: sourceVideoMetadata.rotation,
+            scriptText,
+            title: metadata.title,
+            description: metadata.description,
+            ctaText: selectedCta.ctaText,
+            renderProfileId,
+            renderVariantKey,
+            auditBoost: nextAuditBoost,
+            rendererVersion: RENDERER_VERSION
+          });
+        let renderCacheKey = buildCurrentRenderCacheKey(auditBoost);
+        const previousMp4Path = resolveOutputPath(previousPlatform?.mp4Path);
+        const previousCaptionPath = resolveOutputPath(previousPlatform?.captionPath);
+        const canReuseRenderedMedia =
+          !item.forceFresh &&
+          previousPlatform?.renderCacheKey === renderCacheKey &&
+          previousMp4Path &&
+          previousCaptionPath &&
+          (await this.fileExists(previousMp4Path)) &&
+          (await this.fileExists(previousCaptionPath));
 
-        const mp4Path = path.join(outputDir, mp4Filename);
-        const captionPath = path.join(outputDir, captionFilename);
-        attemptOutputPaths.push(mp4Path, captionPath);
+        let mp4Path: string;
+        let captionPath: string;
+        let latestUrls: string[];
+        if (canReuseRenderedMedia && previousPlatform?.mp4Path && previousPlatform.captionPath) {
+          mp4Path = previousMp4Path!;
+          captionPath = previousCaptionPath!;
+          latestUrls = [
+            previousPlatform.mp4Path,
+            previousPlatform.captionPath ?? toOutputUrl(platformId, path.basename(captionPath))
+          ];
+        } else {
+          const baseName = await resolveVersionedBaseName({
+            directory: outputDir,
+            preferredBaseName: metadata.title,
+            suffixes: [".mp4", "-caption.txt", ".txt"]
+          });
+          const mp4Filename = `${baseName}.mp4`;
+          const captionFilename = `${baseName}-caption.txt`;
+
+          mp4Path = path.join(outputDir, mp4Filename);
+          captionPath = path.join(outputDir, captionFilename);
+          attemptOutputPaths.push(mp4Path, captionPath);
+          latestUrls = [
+            toOutputUrl(platformId, mp4Filename),
+            toOutputUrl(platformId, captionFilename)
+          ];
+        }
 
         const fallbackSocial = {
-          caption: fallbackCaption(job.title, job.description, selectedCta.ctaText),
-          hashtags: fallbackHashtags(job.title, platformId)
+          caption: fallbackCaption(metadata.title, metadata.description, selectedCta.ctaText),
+          hashtags: fallbackHashtags(metadata.title, platformId)
         };
         const captionPrompt = buildReelsMetadataPrompt({
-          title: job.title,
-          description: job.description,
+          title: metadata.title,
+          description: metadata.description,
           platformId,
           scriptText,
           ctaText: selectedCta.ctaText
         });
         const captionCacheKey = buildCaptionCacheKey(settings.scriptModel, captionPrompt);
         const cachedSocialMetadata =
+          !item.forceFresh &&
           previousPlatform?.captionCacheKey === captionCacheKey &&
           previousPlatform.captionText &&
           previousPlatform.hashtags?.length
@@ -357,8 +587,8 @@ export class JobProcessor implements IJobProcessor {
             try {
               const candidate = await this.aiService.generateSocialMetadata({
                 model: settings.scriptModel,
-                title: job.title,
-                description: job.description,
+                title: metadata.title,
+                description: metadata.description,
                 platformId,
                 scriptText,
                 ctaText: selectedCta.ctaText
@@ -387,7 +617,7 @@ export class JobProcessor implements IJobProcessor {
         const captionFileParts = [
           socialMetadata.caption,
           socialMetadata.hashtags.join(" "),
-          job.affiliateLink?.trim() || ""
+          metadata.affiliateLink
         ].filter((part) => part.length > 0);
         await writeFile(captionPath, `${captionFileParts.join("\n\n")}\n`, "utf8");
 
@@ -399,6 +629,7 @@ export class JobProcessor implements IJobProcessor {
           speechRate: platformSettings.speechRate
         });
         const canReuseAudio =
+          !item.forceFresh &&
           previousPlatform?.ttsCacheKey === ttsCacheKey &&
           (await this.fileExists(tempWavPath));
 
@@ -420,17 +651,77 @@ export class JobProcessor implements IJobProcessor {
           });
         }
 
-        await combineVideoWithVoiceOver(
-          job.videoPath,
-          tempWavPath,
-          mp4Path,
-          job.videoDurationSec
-        );
+        let visualAuditStatus: VisualAuditStatus =
+          previousPlatform?.visualAuditStatus ?? "skipped";
+        let visualAuditScore = previousPlatform?.visualAuditScore;
+        const renderCurrentPlatform = async (nextAuditBoost: boolean) => {
+          const tempSrtPath = path.join(
+            path.dirname(job.videoPath),
+            `${platformId}-render-subtitles.srt`
+          );
+          if (!tempArtifactPaths.includes(tempSrtPath)) {
+            tempArtifactPaths.push(tempSrtPath);
+          }
+          auditBoost = nextAuditBoost;
+          renderCacheKey = buildCurrentRenderCacheKey(auditBoost);
+          await writeFile(tempSrtPath, srtText, "utf8");
+          await renderPlatformVideo({
+            sourceVideoPath: job.videoPath,
+            voiceWavPath: tempWavPath,
+            subtitlePath: tempSrtPath,
+            outputVideoPath: mp4Path,
+            targetDurationSec: job.videoDurationSec,
+            videoMetadata: sourceVideoMetadata,
+            renderProfileId,
+            renderVariantKey,
+            auditBoost,
+            titleText: metadata.title,
+            ctaText: selectedCta.ctaText
+          });
+        };
 
-        const latestUrls = [
-          toOutputUrl(platformId, mp4Filename),
-          toOutputUrl(platformId, captionFilename)
-        ];
+        if (!canReuseRenderedMedia) {
+          await renderCurrentPlatform(auditBoost);
+          const auditResult = await this.auditPlatformVisualOutput(
+            item.jobId,
+            platformId,
+            mp4Path
+          );
+          visualAuditStatus = auditResult.status;
+          visualAuditScore = auditResult.score;
+          if (
+            auditResult.status === "failed" &&
+            platformId !== VISUAL_AUDIT_REFERENCE_PLATFORM &&
+            !auditBoost
+          ) {
+            await renderCurrentPlatform(true);
+            const boostedAuditResult = await this.auditPlatformVisualOutput(
+              item.jobId,
+              platformId,
+              mp4Path
+            );
+            visualAuditStatus =
+              boostedAuditResult.status === "passed" ? "boosted" : boostedAuditResult.status;
+            visualAuditScore = boostedAuditResult.score;
+            if (boostedAuditResult.status === "failed") {
+              await this.patchPlatform(item.jobId, platformId, {
+                visualAuditScore,
+                visualAuditStatus: "failed",
+                visualAuditBoosted: true,
+                renderCacheKey
+              });
+              throw new Error(boostedAuditResult.message ?? "Audit visual platform gagal.");
+            }
+          } else if (auditResult.status === "failed") {
+            await this.patchPlatform(item.jobId, platformId, {
+              visualAuditScore,
+              visualAuditStatus: "failed",
+              visualAuditBoosted: auditBoost,
+              renderCacheKey
+            });
+            throw new Error(auditResult.message ?? "Audit visual platform gagal.");
+          }
+        }
 
         const obsoleteOutputPaths = listObsoletePlatformArtifactPaths(previousPlatform, latestUrls);
         if (obsoleteOutputPaths.length > 0) {
@@ -464,6 +755,12 @@ export class JobProcessor implements IJobProcessor {
                   captionPath: latestUrls[1],
                   captionText: socialMetadata.caption,
                   hashtags: socialMetadata.hashtags,
+                  renderProfileId,
+                  renderVariantKey,
+                  renderCacheKey,
+                  visualAuditScore,
+                  visualAuditStatus,
+                  visualAuditBoosted: auditBoost,
                   artifactPaths: latestUrls,
                   updatedAt: nowIso()
                 }
@@ -476,7 +773,9 @@ export class JobProcessor implements IJobProcessor {
         );
       } catch (error) {
         await Promise.all(
-          attemptOutputPaths.map((outputPath) => rm(outputPath, { recursive: false, force: true }))
+          [...new Set([...attemptOutputPaths, ...tempArtifactPaths])].map((outputPath) =>
+            rm(outputPath, { recursive: false, force: true })
+          )
         );
         await this.updatePlatform(
           item.jobId,
@@ -489,6 +788,21 @@ export class JobProcessor implements IJobProcessor {
           { err: error, jobId: item.jobId, platformId },
           "Platform processing gagal."
         );
+      } finally {
+        if (tempArtifactPaths.length > 0) {
+          try {
+            await Promise.all(
+              tempArtifactPaths.map((outputPath) =>
+                rm(outputPath, { recursive: false, force: true })
+              )
+            );
+          } catch (cleanupError) {
+            this.logger.warn(
+              { err: cleanupError, jobId: item.jobId, platformId },
+              "Gagal membersihkan subtitle sementara platform."
+            );
+          }
+        }
       }
     }
 
@@ -497,6 +811,67 @@ export class JobProcessor implements IJobProcessor {
       updatedAt: nowIso(),
       overallStatus: JobsStore.computeOverallStatus(current.platforms)
     }));
+  }
+
+  private async auditPlatformVisualOutput(
+    jobId: string,
+    platformId: PlatformId,
+    mp4Path: string
+  ): Promise<VisualAuditResult> {
+    if (platformId === VISUAL_AUDIT_REFERENCE_PLATFORM) {
+      return { status: "skipped" };
+    }
+
+    const latestJob = await this.jobsStore.getById(jobId);
+    const comparisonPlatforms =
+      latestJob?.platforms.filter(
+        (platform) =>
+          platform.platformId !== platformId &&
+          platform.status === "done" &&
+          Boolean(platform.mp4Path)
+      ) ?? [];
+
+    let checkedCount = 0;
+    let minScore: number | undefined;
+    const failures: string[] = [];
+
+    for (const comparisonPlatform of comparisonPlatforms) {
+      const comparisonPath = resolveOutputPath(comparisonPlatform.mp4Path);
+      if (!comparisonPath || !(await this.fileExists(comparisonPath))) {
+        continue;
+      }
+
+      const result = await compareVideoVisualDifference(mp4Path, comparisonPath);
+      checkedCount += 1;
+      minScore = minScore === undefined ? result.score : Math.min(minScore, result.score);
+      const threshold =
+        comparisonPlatform.platformId === VISUAL_AUDIT_REFERENCE_PLATFORM
+          ? VISUAL_AUDIT_TIKTOK_MIN_SCORE
+          : VISUAL_AUDIT_NON_TIKTOK_MIN_SCORE;
+      if (result.score < threshold) {
+        failures.push(
+          `${PLATFORM_LABELS[platformId]} vs ${PLATFORM_LABELS[comparisonPlatform.platformId]} ${result.score.toFixed(
+            2
+          )}/${threshold.toFixed(2)}`
+        );
+      }
+    }
+
+    if (checkedCount === 0) {
+      return { status: "skipped" };
+    }
+    if (failures.length > 0) {
+      return {
+        status: "failed",
+        score: minScore,
+        message: `Audit visual gagal: perbedaan visual terlalu rendah (${failures.join(", ")}).`
+      };
+    }
+
+    return {
+      status: "passed",
+      score: minScore
+    };
   }
 
   private async markPlatformsFailed(
@@ -613,11 +988,12 @@ export class JobProcessor implements IJobProcessor {
       return true;
     }
 
+    const metadata = getEffectivePlatformMetadata(job, platform);
     const prompt = buildScriptPrompt({
       settings,
       platformId,
-      title: job.title,
-      description: job.description,
+      title: metadata.title,
+      description: metadata.description,
       videoDurationSec: job.videoDurationSec,
       ctaText: platform.selectedCtaText
     });

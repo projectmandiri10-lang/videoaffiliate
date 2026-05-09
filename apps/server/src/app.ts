@@ -19,11 +19,13 @@ import {
   PLATFORM_ORDER,
   findTtsVoiceByName
 } from "./constants.js";
+import { getRenderProfileIdForPlatform, pickRenderVariantKey } from "./render-config.js";
 import { JobsStore } from "./stores/jobs-store.js";
 import { SettingsStore } from "./stores/settings-store.js";
 import type { GenerateSpeechInput, JobRecord, PlatformId } from "./types.js";
 import {
   parseJobUpdateInput,
+  parsePlatformMetadataInput,
   parseRetryPlatformId,
   parseSettings,
   parseTtsPreviewInput
@@ -40,6 +42,9 @@ import { openPathInExplorer } from "./utils/open-location.js";
 import { writeWav24kMono } from "./utils/audio.js";
 import { normalizeApiError } from "./utils/api-error.js";
 import { pruneVoicePreviewFiles } from "./utils/voice-preview.js";
+import { normalizeSocialMetadata } from "./utils/model-output.js";
+import { writeCaptionArtifactForPlatform } from "./utils/caption-artifact.js";
+import { getEffectivePlatformMetadata } from "./utils/job-normalization.js";
 
 interface BuildAppOptions {
   logger: FastifyBaseLogger;
@@ -62,10 +67,16 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function createPlatformRuns(platformIds: PlatformId[]): JobRecord["platforms"] {
+function createPlatformRuns(jobId: string, platformIds: PlatformId[]): JobRecord["platforms"] {
   return platformIds.map((platformId) => ({
     platformId,
     status: "pending",
+    renderProfileId: getRenderProfileIdForPlatform(platformId),
+    renderVariantKey: pickRenderVariantKey(
+      jobId,
+      platformId,
+      getRenderProfileIdForPlatform(platformId)
+    ),
     artifactPaths: [],
     updatedAt: nowIso()
   }));
@@ -94,6 +105,14 @@ function isJobEditable(job: JobRecord): boolean {
 
 function isJobDeletable(job: JobRecord): boolean {
   return job.overallStatus !== "running";
+}
+
+function canRunPlatformAction(job: JobRecord, platform: JobRecord["platforms"][number]): boolean {
+  return job.overallStatus !== "running" && platform.status !== "running";
+}
+
+function parsePlatformIdParam(platformId: string): PlatformId {
+  return parseRetryPlatformId({ platformId });
 }
 
 function resolvePlatformFolderPath(
@@ -151,6 +170,12 @@ function clearRetryablePlatformState(
     scriptCacheKey: undefined,
     captionCacheKey: undefined,
     ttsCacheKey: undefined,
+    renderProfileId: getRenderProfileIdForPlatform(platform.platformId),
+    renderVariantKey: undefined,
+    renderCacheKey: undefined,
+    visualAuditScore: undefined,
+    visualAuditStatus: undefined,
+    visualAuditBoosted: undefined,
     artifactPaths: [],
     updatedAt: nowIso()
   };
@@ -461,6 +486,189 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return reply.send({ ok: true });
   });
 
+  app.post("/api/jobs/:jobId/platforms/:platformId/retry-job", async (request, reply) => {
+    const params = request.params as { jobId: string; platformId: string };
+    const job = await options.jobsStore.getById(params.jobId);
+    if (!job) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+
+    let platformId: PlatformId;
+    try {
+      platformId = parsePlatformIdParam(params.platformId);
+    } catch (error) {
+      return reply.code(400).send({
+        message: "platformId tidak valid.",
+        error: (error as { message?: string })?.message
+      });
+    }
+
+    const platform = job.platforms.find((item) => item.platformId === platformId);
+    if (!platform) {
+      return reply.code(404).send({ message: "Platform pada job tidak ditemukan." });
+    }
+    if (!canRunPlatformAction(job, platform)) {
+      return reply.code(409).send({
+        message: "Retry Job tidak bisa dilakukan saat job atau platform sedang running."
+      });
+    }
+    if (platform.status === "pending") {
+      return reply.code(409).send({
+        message: "Platform masih pending dan sudah berada di antrean."
+      });
+    }
+
+    const remainingCooldownMs = getRetryCooldownRemainingMs(platform.retryAfter);
+    if (remainingCooldownMs > 0) {
+      return reply
+        .code(429)
+        .header("Retry-After", String(Math.ceil(remainingCooldownMs / 1000)))
+        .send({
+          message: "Retry masih cooldown.",
+          error: `Coba lagi dalam ${formatRetryCooldown(remainingCooldownMs)}.`
+        });
+    }
+
+    await options.jobsStore.update(params.jobId, (current) => ({
+      ...current,
+      updatedAt: nowIso(),
+      overallStatus: "queued",
+      platforms: current.platforms.map((item) =>
+        item.platformId === platformId
+          ? {
+              ...item,
+              status: "pending",
+              errorMessage: undefined,
+              retryAfter: undefined,
+              updatedAt: nowIso()
+            }
+          : item
+      )
+    }));
+
+    options.processor.enqueue(params.jobId, [platformId], { forceFresh: true });
+    return reply.send({ ok: true });
+  });
+
+  app.post("/api/jobs/:jobId/platforms/:platformId/retry-caption", async (request, reply) => {
+    const params = request.params as { jobId: string; platformId: string };
+    const job = await options.jobsStore.getById(params.jobId);
+    if (!job) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+
+    let platformId: PlatformId;
+    try {
+      platformId = parsePlatformIdParam(params.platformId);
+    } catch (error) {
+      return reply.code(400).send({
+        message: "platformId tidak valid.",
+        error: (error as { message?: string })?.message
+      });
+    }
+
+    const platform = job.platforms.find((item) => item.platformId === platformId);
+    if (!platform) {
+      return reply.code(404).send({ message: "Platform pada job tidak ditemukan." });
+    }
+    if (!canRunPlatformAction(job, platform)) {
+      return reply.code(409).send({
+        message: "Retry Caption tidak bisa dilakukan saat job atau platform sedang running."
+      });
+    }
+    if (!platform.scriptText?.trim()) {
+      return reply.code(409).send({
+        message: "Retry Caption butuh script platform. Gunakan Retry Job terlebih dahulu."
+      });
+    }
+    if (!options.processor.retryCaption) {
+      return reply.code(503).send({
+        message: "Retry Caption tidak tersedia di processor saat ini."
+      });
+    }
+
+    try {
+      const updated = await options.processor.retryCaption(params.jobId, platformId);
+      return reply.send(updated);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal retry caption platform.");
+    }
+  });
+
+  app.put("/api/jobs/:jobId/platforms/:platformId/metadata", async (request, reply) => {
+    const params = request.params as { jobId: string; platformId: string };
+    const job = await options.jobsStore.getById(params.jobId);
+    if (!job) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+
+    let platformId: PlatformId;
+    try {
+      platformId = parsePlatformIdParam(params.platformId);
+    } catch (error) {
+      return reply.code(400).send({
+        message: "platformId tidak valid.",
+        error: (error as { message?: string })?.message
+      });
+    }
+
+    const platform = job.platforms.find((item) => item.platformId === platformId);
+    if (!platform) {
+      return reply.code(404).send({ message: "Platform pada job tidak ditemukan." });
+    }
+    if (!canRunPlatformAction(job, platform)) {
+      return reply.code(409).send({
+        message: "Edit platform tidak bisa dilakukan saat job atau platform sedang running."
+      });
+    }
+
+    let payload;
+    try {
+      payload = parsePlatformMetadataInput(request.body);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Metadata platform tidak valid.");
+    }
+
+    const social = normalizeSocialMetadata({
+      caption: payload.captionText,
+      hashtags: payload.hashtags
+    });
+
+    const updated = await options.jobsStore.update(params.jobId, (current) => ({
+      ...current,
+      updatedAt: nowIso(),
+      platforms: current.platforms.map((item) =>
+        item.platformId === platformId
+          ? {
+              ...item,
+              titleOverride: payload.title,
+              descriptionOverride: payload.description,
+              affiliateLinkOverride: payload.affiliateLink,
+              captionText: social.caption,
+              hashtags: social.hashtags,
+              captionCacheKey: undefined,
+              errorMessage: undefined,
+              updatedAt: nowIso()
+            }
+          : item
+      )
+    }));
+
+    if (!updated) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+
+    const updatedPlatform = updated.platforms.find((item) => item.platformId === platformId);
+    if (updatedPlatform) {
+      await writeCaptionArtifactForPlatform(
+        updatedPlatform,
+        getEffectivePlatformMetadata(updated, updatedPlatform).affiliateLink
+      );
+    }
+
+    return reply.send(updated);
+  });
+
   app.post("/api/jobs/:jobId/open-location", async (request, reply) => {
     const params = request.params as { jobId: string };
     const job = await options.jobsStore.getById(params.jobId);
@@ -579,7 +787,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         videoMimeType,
         videoDurationSec: durationSec,
         overallStatus: "queued",
-        platforms: createPlatformRuns(PLATFORM_ORDER)
+        platforms: createPlatformRuns(jobId, PLATFORM_ORDER)
       };
       await options.jobsStore.create(job);
       keepUploadDir = true;

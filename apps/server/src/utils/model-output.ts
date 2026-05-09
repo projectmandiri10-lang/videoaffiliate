@@ -11,14 +11,18 @@ function stripCodeFence(input: string): string {
   return withoutFence.join("\n").trim();
 }
 
-function parseJsonObject(raw: string): Record<string, unknown> | undefined {
+function parseJsonValue(raw: string): unknown {
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
+    return JSON.parse(raw);
   } catch {
     return undefined;
+  }
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | undefined {
+  const parsed = parseJsonValue(raw);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
   }
   return undefined;
 }
@@ -56,7 +60,7 @@ function normalizeHashtag(tag: string): string | undefined {
     return undefined;
   }
   const withHash = cleaned.startsWith("#") ? cleaned : `#${cleaned}`;
-  if (withHash.length < 2) {
+  if (withHash.replace(/^#/, "").length < 2) {
     return undefined;
   }
   return withHash.toLowerCase();
@@ -82,6 +86,70 @@ function sanitizeHashtags(raw: string[]): string[] {
 function extractHashtagsFromText(text: string): string[] {
   const matches = text.match(/#[a-zA-Z0-9_]+/g) ?? [];
   return sanitizeHashtags(matches);
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/[\s,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function parseNestedSocialObject(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  let current = stripCodeFence(value);
+  for (let depth = 0; depth < 3; depth += 1) {
+    const parsed = parseJsonValue(current);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    if (typeof parsed !== "string") {
+      return undefined;
+    }
+    current = stripCodeFence(parsed);
+  }
+
+  return undefined;
+}
+
+export function normalizeSocialMetadata(
+  candidate: { caption?: unknown; hashtags?: unknown },
+  fallbackCaption = "",
+  fallbackHashtags: string[] = []
+): {
+  caption: string;
+  hashtags: string[];
+} {
+  const nested = parseNestedSocialObject(candidate.caption);
+  const captionSource = nested ? nested.caption : candidate.caption;
+  const captionText = typeof captionSource === "string" ? captionSource : "";
+  const cleanCaption =
+    sanitizeCaption(captionText).replace(/#[a-zA-Z0-9_]+/g, "").replace(/\s+/g, " ").trim() ||
+    sanitizeCaption(fallbackCaption);
+
+  const hashtags = sanitizeHashtags([
+    ...coerceStringArray(nested?.hashtags),
+    ...coerceStringArray(candidate.hashtags),
+    ...extractHashtagsFromText(captionText),
+    ...fallbackHashtags
+  ]);
+
+  return {
+    caption: cleanCaption,
+    hashtags
+  };
 }
 
 function extractTextFromOpenAiMessageContent(content: unknown): string {
@@ -118,16 +186,10 @@ export function extractSocialMetadata(response: unknown): {
   const stripped = stripCodeFence(raw);
   const json = parseJsonObject(stripped);
   if (json) {
-    const caption = sanitizeCaption(String(json.caption ?? ""));
-    const hashtagsValue = json.hashtags;
-    const fromArray = Array.isArray(hashtagsValue)
-      ? sanitizeHashtags(hashtagsValue.map((item) => String(item)))
-      : [];
-    const fromCaption = extractHashtagsFromText(caption);
-    return {
-      caption: caption.replace(/#[a-zA-Z0-9_]+/g, "").replace(/\s+/g, " ").trim(),
-      hashtags: fromArray.length ? fromArray : fromCaption
-    };
+    return normalizeSocialMetadata({
+      caption: json.caption,
+      hashtags: json.hashtags
+    });
   }
 
   const lines = stripped
@@ -135,9 +197,10 @@ export function extractSocialMetadata(response: unknown): {
     .map((line) => line.trim())
     .filter(Boolean);
   const captionLine = lines.find((line) => !line.startsWith("#")) ?? stripped;
-  const caption = sanitizeCaption(captionLine).replace(/#[a-zA-Z0-9_]+/g, "").trim();
-  const hashtags = extractHashtagsFromText(stripped);
-  return { caption, hashtags };
+  return normalizeSocialMetadata({
+    caption: captionLine,
+    hashtags: extractHashtagsFromText(stripped)
+  });
 }
 
 export function ensureSocialMetadata(
@@ -145,13 +208,12 @@ export function ensureSocialMetadata(
   fallbackCaption: string,
   fallbackHashtags: string[]
 ): { caption: string; hashtags: string[] } {
-  const caption = sanitizeCaption(candidate.caption) || sanitizeCaption(fallbackCaption);
-  const hashtags = sanitizeHashtags(candidate.hashtags);
-  if (hashtags.length) {
-    return { caption, hashtags };
+  const normalized = normalizeSocialMetadata(candidate, fallbackCaption, fallbackHashtags);
+  if (normalized.hashtags.length) {
+    return normalized;
   }
   return {
-    caption,
+    ...normalized,
     hashtags: sanitizeHashtags(fallbackHashtags)
   };
 }

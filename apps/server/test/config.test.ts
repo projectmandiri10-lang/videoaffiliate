@@ -4,6 +4,8 @@ import { loadEnv } from "../src/config.js";
 const ORIGINAL_ENV = {
   SNIFOX_API_BASE: process.env.SNIFOX_API_BASE,
   SNIFOX_API_KEY: process.env.SNIFOX_API_KEY,
+  LITELLM_BASE_URL: process.env.LITELLM_BASE_URL,
+  LITELLM_SECRET_KEY: process.env.LITELLM_SECRET_KEY,
   GEMINI_TTS_API_KEY: process.env.GEMINI_TTS_API_KEY,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   PORT: process.env.PORT,
@@ -21,6 +23,18 @@ function resetEnv() {
     delete process.env.SNIFOX_API_KEY;
   } else {
     process.env.SNIFOX_API_KEY = ORIGINAL_ENV.SNIFOX_API_KEY;
+  }
+
+  if (ORIGINAL_ENV.LITELLM_BASE_URL === undefined) {
+    delete process.env.LITELLM_BASE_URL;
+  } else {
+    process.env.LITELLM_BASE_URL = ORIGINAL_ENV.LITELLM_BASE_URL;
+  }
+
+  if (ORIGINAL_ENV.LITELLM_SECRET_KEY === undefined) {
+    delete process.env.LITELLM_SECRET_KEY;
+  } else {
+    process.env.LITELLM_SECRET_KEY = ORIGINAL_ENV.LITELLM_SECRET_KEY;
   }
 
   if (ORIGINAL_ENV.GEMINI_TTS_API_KEY === undefined) {
@@ -56,7 +70,8 @@ describe("loadEnv", () => {
   it("normalizes SnifoxAI base URL to /v1", () => {
     process.env.SNIFOX_API_BASE = "https://core.snifoxai.com";
     process.env.SNIFOX_API_KEY = "snfx-test";
-    process.env.GEMINI_TTS_API_KEY = "gemini-tts-test";
+    process.env.LITELLM_BASE_URL = "http://localhost:4000";
+    process.env.LITELLM_SECRET_KEY = "litellm-secret";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
@@ -67,7 +82,8 @@ describe("loadEnv", () => {
   it("keeps base URL with existing /v1 path", () => {
     process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1/";
     process.env.SNIFOX_API_KEY = "snfx-test";
-    process.env.GEMINI_TTS_API_KEY = "gemini-tts-test";
+    process.env.LITELLM_BASE_URL = "http://localhost:4000/v1/";
+    process.env.LITELLM_SECRET_KEY = "litellm-secret";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
@@ -75,9 +91,23 @@ describe("loadEnv", () => {
     expect(env.snifoxApiBase).toBe("https://core.snifoxai.com/v1");
   });
 
+  it("normalizes LiteLLM base URL to /v1", () => {
+    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
+    process.env.SNIFOX_API_KEY = "snfx-test";
+    process.env.LITELLM_BASE_URL = "http://localhost:4000/";
+    process.env.LITELLM_SECRET_KEY = "litellm-secret";
+    process.env.PORT = "8787";
+    process.env.WEB_ORIGIN = "http://localhost:5173";
+
+    const env = loadEnv();
+    expect(env.litellmBaseUrl).toBe("http://localhost:4000/v1");
+  });
+
   it("throws when SnifoxAI env is missing", () => {
     delete process.env.SNIFOX_API_BASE;
     delete process.env.SNIFOX_API_KEY;
+    delete process.env.LITELLM_BASE_URL;
+    delete process.env.LITELLM_SECRET_KEY;
     delete process.env.GEMINI_TTS_API_KEY;
     delete process.env.GEMINI_API_KEY;
     process.env.PORT = "8787";
@@ -89,26 +119,29 @@ describe("loadEnv", () => {
     expect(() => loadEnv()).toThrow(/SNIFOX_API_KEY tidak ditemukan/i);
   });
 
-  it("requires a Gemini TTS key for voice-over", () => {
+  it("requires LiteLLM env for voice-over", () => {
     process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
     process.env.SNIFOX_API_KEY = "snfx-test";
+    delete process.env.LITELLM_BASE_URL;
+    delete process.env.LITELLM_SECRET_KEY;
     delete process.env.GEMINI_TTS_API_KEY;
     delete process.env.GEMINI_API_KEY;
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
-    expect(() => loadEnv()).toThrow(/GEMINI_TTS_API_KEY tidak ditemukan/i);
+    expect(() => loadEnv()).toThrow(/LITELLM_BASE_URL tidak ditemukan/i);
   });
 
-  it("supports GEMINI_API_KEY as fallback for TTS", () => {
+  it("does not use legacy Gemini env as fallback for TTS", () => {
     process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
     process.env.SNIFOX_API_KEY = "snfx-test";
-    delete process.env.GEMINI_TTS_API_KEY;
+    delete process.env.LITELLM_BASE_URL;
+    delete process.env.LITELLM_SECRET_KEY;
     process.env.GEMINI_API_KEY = "gemini-legacy-test";
+    process.env.GEMINI_TTS_API_KEY = "gemini-direct-test";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
-    const env = loadEnv();
-    expect(env.geminiTtsApiKey).toBe("gemini-legacy-test");
+    expect(() => loadEnv()).toThrow(/LITELLM_BASE_URL tidak ditemukan/i);
   });
 });

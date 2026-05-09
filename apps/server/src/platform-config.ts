@@ -1,7 +1,8 @@
-import type { PlatformId, SubtitleStyle } from "./types.js";
+import type { PlatformId, RenderProfileId, SubtitleStyle } from "./types.js";
 
 export interface PlatformDefinition {
   label: string;
+  renderProfileId: RenderProfileId;
   voiceStyle: string;
   tone: string;
   hook: string;
@@ -21,6 +22,7 @@ export const PLATFORM_ORDER: PlatformId[] = [
 export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
   tiktok: {
     label: "TikTok",
+    renderProfileId: "native_source",
     voiceStyle: "soft",
     tone: "relatable",
     hook: "curiosity",
@@ -36,6 +38,7 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
   },
   youtube: {
     label: "YouTube Shorts",
+    renderProfileId: "youtube_editorial",
     voiceStyle: "medium",
     tone: "informative",
     hook: "problem_solution",
@@ -51,6 +54,7 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
   },
   facebook: {
     label: "Facebook",
+    renderProfileId: "facebook_story",
     voiceStyle: "evergreen",
     tone: "storytelling",
     hook: "emotional",
@@ -66,6 +70,7 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
   },
   shopee: {
     label: "Shopee",
+    renderProfileId: "shopee_sales",
     voiceStyle: "hard",
     tone: "direct",
     hook: "cta",

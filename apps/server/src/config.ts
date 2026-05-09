@@ -8,19 +8,18 @@ dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 export interface AppEnv {
   snifoxApiBase: string;
   snifoxApiKey: string;
-  geminiTtsApiKey: string;
+  litellmBaseUrl: string;
+  litellmSecretKey: string;
   port: number;
   webOrigins: string[];
 }
 
-function normalizeSnifoxBase(input: string): string {
+function normalizeOpenAiCompatibleBase(input: string, envName: string, example: string): string {
   let url: URL;
   try {
     url = new URL(input);
   } catch {
-    throw new Error(
-      "SNIFOX_API_BASE tidak valid. Gunakan URL penuh, contoh: https://core.snifoxai.com/v1"
-    );
+    throw new Error(`${envName} tidak valid. Gunakan URL penuh, contoh: ${example}`);
   }
 
   const cleanPath = url.pathname.replace(/\/+$/, "");
@@ -30,11 +29,27 @@ function normalizeSnifoxBase(input: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+function normalizeSnifoxBase(input: string): string {
+  return normalizeOpenAiCompatibleBase(
+    input,
+    "SNIFOX_API_BASE",
+    "https://core.snifoxai.com/v1"
+  );
+}
+
+function normalizeLiteLlmBase(input: string): string {
+  return normalizeOpenAiCompatibleBase(
+    input,
+    "LITELLM_BASE_URL",
+    "http://localhost:4000/v1"
+  );
+}
+
 export function loadEnv(): AppEnv {
   const snifoxApiBaseRaw = process.env.SNIFOX_API_BASE?.trim() ?? "";
   const snifoxApiKey = process.env.SNIFOX_API_KEY?.trim() ?? "";
-  const geminiTtsApiKey =
-    process.env.GEMINI_TTS_API_KEY?.trim() ?? process.env.GEMINI_API_KEY?.trim() ?? "";
+  const litellmBaseUrlRaw = process.env.LITELLM_BASE_URL?.trim() ?? "";
+  const litellmSecretKey = process.env.LITELLM_SECRET_KEY?.trim() ?? "";
   const portRaw = process.env.PORT?.trim();
   const port = portRaw ? Number(portRaw) : DEFAULT_PORT;
   const webOrigins = (process.env.WEB_ORIGIN?.trim() || "http://localhost:5173")
@@ -54,9 +69,15 @@ export function loadEnv(): AppEnv {
     );
   }
 
-  if (!geminiTtsApiKey) {
+  if (!litellmBaseUrlRaw) {
     throw new Error(
-      "GEMINI_TTS_API_KEY tidak ditemukan. Isi API key Gemini untuk voice-over, atau gunakan GEMINI_API_KEY sebagai fallback."
+      "LITELLM_BASE_URL tidak ditemukan. Isi endpoint LiteLLM OpenAI-compatible untuk voice-over."
+    );
+  }
+
+  if (!litellmSecretKey) {
+    throw new Error(
+      "LITELLM_SECRET_KEY tidak ditemukan. Isi secret LiteLLM untuk voice-over."
     );
   }
 
@@ -73,7 +94,8 @@ export function loadEnv(): AppEnv {
   return {
     snifoxApiBase: normalizeSnifoxBase(snifoxApiBaseRaw),
     snifoxApiKey,
-    geminiTtsApiKey,
+    litellmBaseUrl: normalizeLiteLlmBase(litellmBaseUrlRaw),
+    litellmSecretKey,
     port,
     webOrigins
   };

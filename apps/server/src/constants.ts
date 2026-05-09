@@ -14,7 +14,7 @@ export { PLATFORM_CONFIG, PLATFORM_LABELS, PLATFORM_ORDER } from "./platform-con
 
 export const DEFAULT_SETTINGS: AppSettings = {
   scriptModel: "google/gemini-3-flash-preview",
-  ttsModel: "gemini-2.5-flash-preview-tts",
+  ttsModel: "vertex_ai/gemini-2.5-flash-tts",
   language: "id-ID",
   maxVideoSeconds: 60,
   safetyMode: "safe_marketing",

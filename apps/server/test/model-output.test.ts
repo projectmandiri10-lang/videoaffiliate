@@ -100,6 +100,32 @@ describe("model output parser", () => {
     expect(social.hashtags).toEqual(["#hemat", "#affiliate"]);
   });
 
+  it("cleans nested json stored inside caption text", () => {
+    const response = {
+      text: JSON.stringify({
+        caption: JSON.stringify({
+          caption: "Caption bersih dari nested JSON. #affiliate",
+          hashtags: [" g", "#affiliate", "#PlanterBag"]
+        }),
+        hashtags: ["#mediatanam", "#affiliate"]
+      })
+    };
+
+    const social = extractSocialMetadata(response);
+
+    expect(social.caption).toBe("Caption bersih dari nested JSON.");
+    expect(social.hashtags).toEqual(["#affiliate", "#planterbag", "#mediatanam"]);
+  });
+
+  it("normalizes caption with inline hashtags and removes duplicates", () => {
+    const social = extractSocialMetadata({
+      text: "Caption manual #Affiliate #Affiliate\n#PlanterBag #AI"
+    });
+
+    expect(social.caption).toBe("Caption manual");
+    expect(social.hashtags).toEqual(["#affiliate", "#planterbag", "#ai"]);
+  });
+
   it("falls back to default metadata if hashtags empty", () => {
     const candidate = {
       caption: "Caption saja tanpa hashtag",

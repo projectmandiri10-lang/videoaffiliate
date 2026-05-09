@@ -690,6 +690,22 @@ select:focus {
   gap: 12px;
 }
 
+.platform-run-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.platform-edit-form {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 255, 255, 0.12);
+  background: rgba(15, 255, 255, 0.035);
+}
+
 .detail-summary {
   padding: 16px 18px;
   border-radius: 18px;

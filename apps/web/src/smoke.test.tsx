@@ -17,14 +17,17 @@ vi.mock("./api", async () => {
     openPlatformOutputLocation: vi.fn(),
     previewTtsVoice: vi.fn(),
     retryPlatform: vi.fn(),
+    retryPlatformCaption: vi.fn(),
+    retryPlatformJob: vi.fn(),
     updateJob: vi.fn(),
+    updatePlatformMetadata: vi.fn(),
     updateSettings: vi.fn()
   };
 });
 
 const mockSettings = {
   scriptModel: "google/gemini-3-flash-preview",
-  ttsModel: "gemini-2.5-flash-preview-tts",
+  ttsModel: "vertex_ai/gemini-2.5-flash-tts",
   language: "id-ID" as const,
   maxVideoSeconds: 60,
   safetyMode: "safe_marketing" as const,
@@ -191,8 +194,157 @@ describe("web smoke", () => {
     expect(screen.getByText("TikTok")).toBeTruthy();
     expect(screen.getByText("Shopee")).toBeTruthy();
     expect(screen.getByRole("button", { name: /hapus job/i })).toBeTruthy();
-    expect((screen.getByRole("button", { name: /retry/i }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expect(
+      (screen.getByRole("button", { name: /retry job \(/i }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+
+  it("hides legacy srt links and shows only mp4 plus caption outputs", async () => {
+    vi.mocked(api.fetchJobs).mockResolvedValue([
+      {
+        jobId: "job-legacy-srt",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        title: "Job Legacy",
+        description: "Deskripsi legacy",
+        affiliateLink: "https://contoh-affiliate.test/job-legacy",
+        videoPath: "C:/video.mp4",
+        videoMimeType: "video/mp4",
+        videoDurationSec: 20,
+        overallStatus: "success",
+        platforms: [
+          {
+            platformId: "tiktok",
+            status: "done",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            mp4Path: "/outputs/tiktok/job-legacy.mp4",
+            captionPath: "/outputs/tiktok/job-legacy-caption.txt",
+            srtPath: "/outputs/tiktok/job-legacy.srt",
+            visualAuditStatus: "skipped",
+            artifactPaths: [
+              "/outputs/tiktok/job-legacy.mp4",
+              "/outputs/tiktok/job-legacy-caption.txt",
+              "/outputs/tiktok/job-legacy.srt"
+            ]
+          },
+          {
+            platformId: "youtube",
+            status: "pending",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            artifactPaths: []
+          },
+          {
+            platformId: "facebook",
+            status: "pending",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            artifactPaths: []
+          },
+          {
+            platformId: "shopee",
+            status: "pending",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+            artifactPaths: []
+          }
+        ]
+      }
+    ]);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
+
+    expect(await screen.findByText(/Tersedia: MP4, Caption TXT/i)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "MP4" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Caption TXT" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "SRT" })).toBeNull();
+    expect(screen.getByText("Audit: reference native")).toBeTruthy();
+  });
+
+  it("edits platform metadata and renders per-platform caption actions", async () => {
+    const job = {
+      jobId: "job-2",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      title: "Job Dua",
+      description: "Deskripsi Job Dua",
+      affiliateLink: "https://contoh-affiliate.test/job-2",
+      videoPath: "C:/video.mp4",
+      videoMimeType: "video/mp4",
+      videoDurationSec: 20,
+      overallStatus: "success" as const,
+      platforms: [
+        {
+          platformId: "tiktok" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          scriptText: "Script tersedia",
+          captionText: "Caption bersih.",
+          hashtags: ["#affiliate"],
+          artifactPaths: []
+        },
+        {
+          platformId: "youtube" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          artifactPaths: []
+        },
+        {
+          platformId: "facebook" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          artifactPaths: []
+        },
+        {
+          platformId: "shopee" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          artifactPaths: []
+        }
+      ]
+    };
+    const updatedJob = {
+      ...job,
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
+          ? {
+              ...platform,
+              titleOverride: "Judul TikTok",
+              descriptionOverride: "Deskripsi TikTok",
+              affiliateLinkOverride: "https://contoh-affiliate.test/tiktok",
+              captionText: "Caption edit.",
+              hashtags: ["#edit"]
+            }
+          : platform
+      )
+    };
+    vi.mocked(api.fetchJobs).mockResolvedValue([job]);
+    vi.mocked(api.updatePlatformMetadata).mockResolvedValue(updatedJob);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
+
+    expect(await screen.findByText("Caption bersih.")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /retry caption/i }).length).toBeGreaterThan(0);
+    const editButton = screen.getAllByRole("button", { name: "Edit" })[0];
+    if (!editButton) {
+      throw new Error("Edit button not found");
+    }
+    fireEvent.click(editButton);
+    fireEvent.change(screen.getByLabelText("Caption"), {
+      target: { value: "Caption edit." }
+    });
+    fireEvent.change(screen.getByLabelText("Hashtags"), {
+      target: { value: "#edit" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /simpan platform/i }));
+
+    await waitFor(() => {
+      expect(api.updatePlatformMetadata).toHaveBeenCalledWith("job-2", "tiktok", {
+        title: "Job Dua",
+        description: "Deskripsi Job Dua",
+        affiliateLink: "https://contoh-affiliate.test/job-2",
+        captionText: "Caption edit.",
+        hashtags: ["#edit"]
+      });
+    });
   });
 });

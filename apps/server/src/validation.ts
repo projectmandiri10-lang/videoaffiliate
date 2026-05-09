@@ -55,6 +55,14 @@ const jobUpdateSchema = z.object({
   affiliateLink: nonEmptyTextSchema
 });
 
+const platformMetadataSchema = z.object({
+  title: nonEmptyTextSchema,
+  description: nonEmptyTextSchema,
+  affiliateLink: nonEmptyTextSchema,
+  captionText: nonEmptyTextSchema,
+  hashtags: z.union([z.array(z.string()), z.string()]).optional().default([])
+});
+
 const ttsPreviewSchema = z.object({
   voiceName: z
     .string()
@@ -87,6 +95,28 @@ export function parseJobUpdateInput(input: unknown): {
   affiliateLink: string;
 } {
   return jobUpdateSchema.parse(input);
+}
+
+export function parsePlatformMetadataInput(input: unknown): {
+  title: string;
+  description: string;
+  affiliateLink: string;
+  captionText: string;
+  hashtags: string[];
+} {
+  const parsed = platformMetadataSchema.parse(input);
+  return {
+    title: parsed.title,
+    description: parsed.description,
+    affiliateLink: parsed.affiliateLink,
+    captionText: parsed.captionText,
+    hashtags: Array.isArray(parsed.hashtags)
+      ? parsed.hashtags
+      : parsed.hashtags
+          .split(/[\s,]+/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+  };
 }
 
 export function parseSpeechRate(input: unknown): number {

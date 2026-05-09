@@ -13,6 +13,25 @@ interface AnalysisVideoVariant {
   scale: string;
 }
 
+interface FfprobeStream {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  tags?: {
+    rotate?: string;
+  };
+  side_data_list?: Array<{
+    rotation?: number;
+  }>;
+}
+
+interface FfprobeJsonOutput {
+  streams?: FfprobeStream[];
+  format?: {
+    duration?: string;
+  };
+}
+
 const ANALYSIS_VIDEO_VARIANTS: AnalysisVideoVariant[] = [
   { crf: 35, fps: 2, scale: "360:-2" },
   { crf: 38, fps: 1, scale: "288:-2" },
@@ -25,6 +44,15 @@ export interface PreparedModelVideo {
   originalBytes: number;
   uploadBytes: number;
   compressed: boolean;
+}
+
+export interface ProbedVideoMetadata {
+  durationSec: number;
+  width: number;
+  height: number;
+  rotation: number;
+  displayWidth: number;
+  displayHeight: number;
 }
 
 function resolveFfmpegExecutable(): string {
@@ -43,11 +71,37 @@ function resolveFfmpegExecutable(): string {
 
 const FFMPEG_EXEC = resolveFfmpegExecutable();
 
-export async function probeVideoDuration(filePath: string): Promise<number> {
+function getFfprobePath(): string {
   const ffprobePath = (ffprobeStatic as { path?: string }).path;
   if (!ffprobePath) {
     throw new Error("ffprobe-static tidak tersedia.");
   }
+  return ffprobePath;
+}
+
+function normalizeRotation(rotation: number): number {
+  const normalized = ((rotation % 360) + 360) % 360;
+  return normalized === 270 ? -90 : normalized;
+}
+
+function resolveStreamRotation(stream: FfprobeStream | undefined): number {
+  const tagged = Number(stream?.tags?.rotate);
+  if (Number.isFinite(tagged)) {
+    return normalizeRotation(tagged);
+  }
+
+  const sided = Number(
+    stream?.side_data_list?.find((item) => Number.isFinite(item.rotation))?.rotation
+  );
+  if (Number.isFinite(sided)) {
+    return normalizeRotation(sided);
+  }
+
+  return 0;
+}
+
+export async function probeVideoDuration(filePath: string): Promise<number> {
+  const ffprobePath = getFfprobePath();
 
   return new Promise<number>((resolve, reject) => {
     const args = [
@@ -82,6 +136,80 @@ export async function probeVideoDuration(filePath: string): Promise<number> {
         return;
       }
       resolve(duration);
+    });
+  });
+}
+
+export async function probeVideoMetadata(filePath: string): Promise<ProbedVideoMetadata> {
+  const ffprobePath = getFfprobePath();
+
+  return new Promise<ProbedVideoMetadata>((resolve, reject) => {
+    const args = [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_streams",
+      "-show_format",
+      "-print_format",
+      "json",
+      filePath
+    ];
+    const process = spawn(ffprobePath, args, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+
+    process.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    process.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+
+    process.once("error", (error) => reject(error));
+    process.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Gagal membaca metadata video: ${stderr || code}`));
+        return;
+      }
+
+      let parsed: FfprobeJsonOutput;
+      try {
+        parsed = JSON.parse(stdout) as FfprobeJsonOutput;
+      } catch (error) {
+        reject(
+          new Error(
+            `Metadata video tidak bisa diparse: ${
+              (error as { message?: string })?.message || "JSON tidak valid"
+            }`
+          )
+        );
+        return;
+      }
+
+      const durationSec = Number(parsed.format?.duration);
+      const videoStream = parsed.streams?.find((stream) => stream.codec_type === "video");
+      const width = Number(videoStream?.width);
+      const height = Number(videoStream?.height);
+      if (!Number.isFinite(durationSec) || durationSec <= 0) {
+        reject(new Error("Durasi video dari metadata tidak valid."));
+        return;
+      }
+      if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+        reject(new Error("Resolusi video dari metadata tidak valid."));
+        return;
+      }
+
+      const rotation = resolveStreamRotation(videoStream);
+      const rotated = Math.abs(rotation) === 90;
+      resolve({
+        durationSec,
+        width,
+        height,
+        rotation,
+        displayWidth: rotated ? height : width,
+        displayHeight: rotated ? width : height
+      });
     });
   });
 }

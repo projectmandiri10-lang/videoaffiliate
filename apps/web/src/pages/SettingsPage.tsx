@@ -118,13 +118,16 @@ export function SettingsPage() {
           <p className="page-intro">
             Tone, hook, dan subtitle style dikunci oleh sistem. Isi `Script Model` dan `TTS
             Model` sesuai provider masing-masing: script/caption lewat SnifoxAI, voice-over lewat
-            Gemini TTS direct.
+            LiteLLM yang meroute ke Gemini TTS.
           </p>
           <p className="section-note">
             Jika model utama di SnifoxAI gagal, server akan fallback otomatis ke model text-only
-            yang tersedia. Jika Gemini TTS ditolak, server hanya akan fallback ke voice Windows
-            lokal bila ada voice Indonesia; kalau tidak ada, job akan gagal dengan pesan yang
-            jelas.
+            yang tersedia. Jika LiteLLM TTS gagal, server hanya akan fallback ke voice Windows
+            lokal bila ada voice Indonesia; kalau tidak ada, job akan gagal dengan pesan yang jelas.
+          </p>
+          <p className="section-note">
+            Visual TikTok tetap memakai source asli. YouTube, Facebook, dan Shopee otomatis
+            dirender ulang oleh backend memakai preset visual platform-native yang dikunci sistem.
           </p>
         </div>
         <button type="submit" form="settings-form" className="primary-button" disabled={saving}>
@@ -159,7 +162,7 @@ export function SettingsPage() {
                 onChange={(event) => setSettings({ ...settings, ttsModel: event.target.value })}
               />
               <span className="small">
-                Dipakai oleh Gemini direct TTS, contoh: gemini-2.5-flash-preview-tts.
+                Dipakai oleh LiteLLM untuk route ke Gemini TTS, contoh: vertex_ai/gemini-2.5-flash-tts.
               </span>
             </label>
 

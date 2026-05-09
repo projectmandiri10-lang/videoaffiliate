@@ -1,4 +1,4 @@
-# Auto Voice Over + Caption (Snifox Gateway + Gemini)
+# Auto Voice Over + Caption (Snifox Gateway + LiteLLM Gemini TTS)
 
 Aplikasi untuk otomatisasi:
 - input: `video + judul + deskripsi + affiliate link`
@@ -8,7 +8,7 @@ Aplikasi untuk otomatisasi:
 ## Stack
 - Frontend: React + Vite + TypeScript
 - Backend: Fastify + TypeScript
-- AI: Snifox gateway (OpenAI-compatible) untuk script/caption + Gemini native untuk TTS voice-over, dengan fallback otomatis ke model text-only lain di gateway dan voice Windows lokal saat provider utama gagal
+- AI: Snifox gateway (OpenAI-compatible) untuk script/caption + LiteLLM (route ke Gemini TTS) untuk voice-over, dengan fallback otomatis ke model text-only lain di gateway dan voice Windows lokal saat provider utama gagal
 - Media: `ffmpeg-static` + `ffprobe-static` (tanpa install FFmpeg global)
 - Runtime aplikasi: Node.js (Python tidak dipakai untuk runtime aplikasi ini)
 
@@ -29,7 +29,7 @@ npm install
 ```bash
 copy .env.example .env
 ```
-3. Isi `SNIFOX_API_BASE`, `SNIFOX_API_KEY`, dan `GEMINI_TTS_API_KEY` di `.env`.
+3. Isi `SNIFOX_API_BASE`, `SNIFOX_API_KEY`, `LITELLM_BASE_URL`, dan `LITELLM_SECRET_KEY` di `.env`.
 
 ## Menjalankan (dev)
 ```bash
@@ -74,7 +74,8 @@ npm run start
 ```env
 SNIFOX_API_BASE=https://core.snifoxai.com/v1
 SNIFOX_API_KEY=snfx-your-api-key
-GEMINI_TTS_API_KEY=...
+LITELLM_BASE_URL=http://localhost:4000/v1
+LITELLM_SECRET_KEY=...
 PORT=<port_dari_cpanel>
 WEB_ORIGIN=https://domain-anda
 ```
@@ -103,8 +104,11 @@ npm run start
 - `POST /api/jobs` (multipart: `video`, `title`, `description`)
 - `GET /api/jobs`
 - `GET /api/jobs/:jobId`
-- `POST /api/jobs/:jobId/retry` body `{ "styleId": "evergreen" | "soft_selling" | "hard_selling" | "problem_solution" }`
-- `POST /api/jobs/:jobId/open-location` body `{ "styleId": "evergreen" | "soft_selling" | "hard_selling" | "problem_solution" }` (opsional untuk environment Windows)
+- `POST /api/jobs/:jobId/retry` body `{ "platformId": "tiktok" | "youtube" | "facebook" | "shopee" }` untuk kompatibilitas retry platform gagal
+- `POST /api/jobs/:jobId/platforms/:platformId/retry-job`
+- `POST /api/jobs/:jobId/platforms/:platformId/retry-caption`
+- `PUT /api/jobs/:jobId/platforms/:platformId/metadata` body `{ "title": "...", "description": "...", "affiliateLink": "...", "captionText": "...", "hashtags": ["#tag"] }`
+- `POST /api/jobs/:jobId/open-location` body `{ "platformId": "tiktok" | "youtube" | "facebook" | "shopee" }` (opsional untuk environment Windows)
 
 ## Catatan Operasional
 - Maks durasi video default: 60 detik (ubah di settings).
@@ -116,10 +120,11 @@ npm run start
 - Form `Generate` menyediakan kotak `Affiliate Link`.
 - Tab `Jobs` menampilkan caption final siap copy (caption + hashtag + affiliate link job).
 - `scriptModel` harus memakai ID model SnifoxAI lengkap yang aktif di gateway. Contoh default project ini: `google/gemini-3-flash-preview`.
-- `ttsModel` tetap model Gemini direct untuk voice-over, contoh `gemini-2.5-flash-preview-tts`.
+- `ttsModel` tetap model Gemini TTS untuk voice-over, tetapi request-nya sekarang diroute lewat LiteLLM. Contoh yang valid di proxy ini: `vertex_ai/gemini-2.5-flash-tts`.
 - Jika model utama sedang gagal atau unavailable di gateway, server otomatis fallback ke model text-only lain yang masih tersedia agar caption/script tetap jalan.
-- Jika Gemini TTS mengembalikan `403 PERMISSION_DENIED` atau gagal di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.
+- Jika LiteLLM TTS atau Gemini TTS di belakangnya mengembalikan error di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.
 - `SNIFOX_API_BASE` harus menunjuk ke endpoint OpenAI-compatible yang aktif, dan env repo ini saat ini memakai `https://core.snifoxai.com/v1`.
+- `LITELLM_BASE_URL` harus menunjuk ke endpoint LiteLLM OpenAI-compatible yang aktif, misalnya `http://localhost:4000/v1`.
 - Daftar model aktif bisa dicek lewat endpoint `GET /models` pada gateway Anda.
 - Dokumentasi gateway default repo ini: `https://snifoxai.com/docs`
 

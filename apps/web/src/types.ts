@@ -4,7 +4,15 @@ export type CtaMode = "random" | "sequential";
 
 export type VoiceGender = "female" | "male" | "neutral";
 
+export type RenderProfileId =
+  | "native_source"
+  | "youtube_editorial"
+  | "facebook_story"
+  | "shopee_sales";
+
 export type PlatformStatus = "pending" | "running" | "done" | "failed" | "interrupted";
+
+export type VisualAuditStatus = "passed" | "boosted" | "failed" | "skipped";
 
 export type JobOverallStatus =
   | "queued"
@@ -37,14 +45,23 @@ export interface AppSettings {
 export interface PlatformRun {
   platformId: PlatformId;
   status: PlatformStatus;
+  renderProfileId?: RenderProfileId;
+  renderVariantKey?: string;
+  visualAuditScore?: number;
+  visualAuditStatus?: VisualAuditStatus;
+  visualAuditBoosted?: boolean;
   errorMessage?: string;
   retryAfter?: string;
+  titleOverride?: string;
+  descriptionOverride?: string;
+  affiliateLinkOverride?: string;
   scriptPath?: string;
   srtPath?: string;
   mp4Path?: string;
   captionPath?: string;
   captionText?: string;
   hashtags?: string[];
+  scriptText?: string;
   artifactPaths: string[];
   updatedAt: string;
 }

@@ -2,7 +2,7 @@ import { buildApp } from "./app.js";
 import { loadEnv } from "./config.js";
 import { FallbackSpeechGenerator } from "./services/fallback-speech-generator.js";
 import { JobProcessor } from "./services/job-processor.js";
-import { GeminiTtsService } from "./services/gemini-tts-service.js";
+import { LiteLlmTtsService } from "./services/litellm-tts-service.js";
 import { SnifoxService } from "./services/snifox-service.js";
 import { resumeIncompleteJobs } from "./services/startup-resume.js";
 import { WindowsTtsService } from "./services/windows-tts-service.js";
@@ -18,11 +18,12 @@ async function bootstrap(): Promise<void> {
   const settingsStore = new SettingsStore();
   const jobsStore = new JobsStore();
   await jobsStore.markRunningAsInterrupted();
+  await jobsStore.normalizeAll();
 
   const snifox = new SnifoxService(env.snifoxApiBase, env.snifoxApiKey, logger);
-  const geminiTts = new GeminiTtsService(env.geminiTtsApiKey, logger);
+  const liteLlmTts = new LiteLlmTtsService(env.litellmBaseUrl, env.litellmSecretKey, logger);
   const windowsTts = new WindowsTtsService(logger);
-  const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, geminiTts);
+  const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, liteLlmTts);
   const processor = new JobProcessor(
     jobsStore,
     settingsStore,

@@ -3,6 +3,7 @@ import path from "node:path";
 import { MAX_HISTORY } from "../constants.js";
 import type { JobOverallStatus, JobRecord, PlatformRun, PlatformStatus } from "../types.js";
 import { JsonFile } from "../utils/json-file.js";
+import { normalizeJobRecord } from "../utils/job-normalization.js";
 import { JOBS_FILE, UPLOADS_DIR, outputUrlToAbsolutePath } from "../utils/paths.js";
 
 function nowIso(): string {
@@ -44,23 +45,25 @@ export class JobsStore {
 
   public async list(): Promise<JobRecord[]> {
     const jobs = await this.file.get();
-    return jobs;
+    return jobs.map(normalizeJobRecord);
   }
 
   public async getById(jobId: string): Promise<JobRecord | undefined> {
     const jobs = await this.file.get();
-    return jobs.find((job) => job.jobId === jobId);
+    const job = jobs.find((item) => item.jobId === jobId);
+    return job ? normalizeJobRecord(job) : undefined;
   }
 
   public async create(job: JobRecord): Promise<JobRecord> {
+    const normalizedJob = normalizeJobRecord(job);
     await this.file.update(async (jobs) => {
-      const next = [job, ...jobs];
+      const next = [normalizedJob, ...jobs.map(normalizeJobRecord)];
       const removed = next.slice(MAX_HISTORY);
       const kept = next.slice(0, MAX_HISTORY);
       await Promise.all(removed.map((item) => this.cleanupJobArtifacts(item)));
       return kept;
     });
-    return job;
+    return normalizedJob;
   }
 
   public async update(
@@ -74,10 +77,11 @@ export class JobsStore {
       if (index < 0) {
         return jobs;
       }
-      const current = next[index];
-      if (!current) {
+      const currentRaw = next[index];
+      if (!currentRaw) {
         return jobs;
       }
+      const current = normalizeJobRecord(currentRaw);
       updated = updater({
         ...current,
         platforms: current.platforms.map((platform) => ({
@@ -86,7 +90,8 @@ export class JobsStore {
         }))
       });
       if (updated) {
-        next[index] = updated;
+        next[index] = normalizeJobRecord(updated);
+        updated = next[index];
       }
       return next;
     });
@@ -116,7 +121,8 @@ export class JobsStore {
 
   public async markRunningAsInterrupted(): Promise<void> {
     await this.file.update((jobs) =>
-      jobs.map((job) => {
+      jobs.map((rawJob) => {
+        const job = normalizeJobRecord(rawJob);
         if (job.overallStatus !== "running") {
           return job;
         }
@@ -137,6 +143,10 @@ export class JobsStore {
         };
       })
     );
+  }
+
+  public async normalizeAll(): Promise<void> {
+    await this.file.update((jobs) => jobs.map(normalizeJobRecord));
   }
 
   public static computeOverallStatus(platforms: PlatformRun[]): JobOverallStatus {

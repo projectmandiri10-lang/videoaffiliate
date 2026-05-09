@@ -37,12 +37,36 @@ describe("api integration", () => {
   const logger = pino({ level: "silent" });
   const settingsStore = new SettingsStore();
   const jobsStore = new JobsStore();
-  const enqueueCalls: Array<{ jobId: string; platformIds?: PlatformId[] }> = [];
+  const enqueueCalls: Array<{
+    jobId: string;
+    platformIds?: PlatformId[];
+    forceFresh?: boolean;
+  }> = [];
+  const retryCaptionCalls: Array<{ jobId: string; platformId: PlatformId }> = [];
   const openCalls: string[] = [];
   const previewWrites: string[] = [];
   const processor = {
-    enqueue(jobId: string, platformIds?: PlatformId[]) {
-      enqueueCalls.push({ jobId, platformIds });
+    enqueue(jobId: string, platformIds?: PlatformId[], options?: { forceFresh?: boolean }) {
+      enqueueCalls.push({ jobId, platformIds, ...options });
+    },
+    async retryCaption(jobId: string, platformId: PlatformId) {
+      retryCaptionCalls.push({ jobId, platformId });
+      const updated = await jobsStore.update(jobId, (job) => ({
+        ...job,
+        platforms: job.platforms.map((platform) =>
+          platform.platformId === platformId
+            ? {
+                ...platform,
+                captionText: "Caption retry dari processor.",
+                hashtags: ["#retry"]
+              }
+            : platform
+        )
+      }));
+      if (!updated) {
+        throw new Error("Job tidak ditemukan.");
+      }
+      return updated;
     }
   };
 
@@ -59,6 +83,7 @@ describe("api integration", () => {
 
   beforeEach(async () => {
     enqueueCalls.length = 0;
+    retryCaptionCalls.length = 0;
     openCalls.length = 0;
     previewWrites.length = 0;
     probeDuration = async () => 30;
@@ -337,6 +362,231 @@ describe("api integration", () => {
       message: "Retry masih cooldown."
     });
     expect(enqueueCalls).toHaveLength(1);
+  });
+
+  it("queues forced retry job for completed platform", async () => {
+    const form = buildCreateForm({
+      title: "Judul Retry Job",
+      description: "Deskripsi Retry Job",
+      affiliateLink: "https://contoh-affiliate.test/retry-job"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "success",
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
+          ? {
+              ...platform,
+              status: "done",
+              captionText: "Caption lama.",
+              hashtags: ["#lama"],
+              updatedAt: new Date().toISOString()
+            }
+          : { ...platform, status: "done" }
+      )
+    }));
+
+    const retryResponse = await app.inject({
+      method: "POST",
+      url: `/api/jobs/${payload.jobId}/platforms/tiktok/retry-job`
+    });
+
+    expect(retryResponse.statusCode).toBe(200);
+    expect(enqueueCalls[enqueueCalls.length - 1]).toMatchObject({
+      jobId: payload.jobId,
+      platformIds: ["tiktok"],
+      forceFresh: true
+    });
+  });
+
+  it("retries caption through processor when script exists", async () => {
+    const form = buildCreateForm({
+      title: "Judul Retry Caption",
+      description: "Deskripsi Retry Caption",
+      affiliateLink: "https://contoh-affiliate.test/retry-caption"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "success",
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
+          ? {
+              ...platform,
+              status: "done",
+              scriptText: "Script sudah ada.",
+              captionText: "Caption lama.",
+              hashtags: ["#lama"],
+              updatedAt: new Date().toISOString()
+            }
+          : { ...platform, status: "done" }
+      )
+    }));
+
+    const retryResponse = await app.inject({
+      method: "POST",
+      url: `/api/jobs/${payload.jobId}/platforms/tiktok/retry-caption`
+    });
+
+    expect(retryResponse.statusCode).toBe(200);
+    expect(retryCaptionCalls).toEqual([{ jobId: payload.jobId, platformId: "tiktok" }]);
+    expect(retryResponse.json()).toMatchObject({
+      jobId: payload.jobId
+    });
+  });
+
+  it("edits platform metadata and rewrites caption artifact", async () => {
+    const form = buildCreateForm({
+      title: "Judul Platform",
+      description: "Deskripsi Platform",
+      affiliateLink: "https://contoh-affiliate.test/platform"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    const outputDir = path.join(OUTPUTS_DIR, "tiktok");
+    const captionFile = path.join(outputDir, "judul-platform-caption.txt");
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(captionFile, "caption lama\n", "utf8");
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "success",
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok"
+          ? {
+              ...platform,
+              status: "done",
+              captionPath: "/outputs/tiktok/judul-platform-caption.txt",
+              captionText: "Caption lama.",
+              hashtags: ["#lama"],
+              updatedAt: new Date().toISOString()
+            }
+          : { ...platform, status: "done" }
+      )
+    }));
+
+    const updateResponse = await app.inject({
+      method: "PUT",
+      url: `/api/jobs/${payload.jobId}/platforms/tiktok/metadata`,
+      payload: {
+        title: "Judul Khusus TikTok",
+        description: "Deskripsi khusus TikTok",
+        affiliateLink: "https://contoh-affiliate.test/tiktok",
+        captionText: "Caption manual #Affiliate",
+        hashtags: ["#affiliate", "#PlanterBag"]
+      }
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    const updated = updateResponse.json();
+    const tiktok = updated.platforms.find(
+      (platform: { platformId: string }) => platform.platformId === "tiktok"
+    );
+    expect(tiktok).toMatchObject({
+      titleOverride: "Judul Khusus TikTok",
+      descriptionOverride: "Deskripsi khusus TikTok",
+      affiliateLinkOverride: "https://contoh-affiliate.test/tiktok",
+      captionText: "Caption manual"
+    });
+    expect(tiktok.hashtags).toEqual(["#affiliate", "#planterbag"]);
+    const captionFileText = await readFile(captionFile, "utf8");
+    expect(captionFileText).toContain("Caption manual");
+    expect(captionFileText).toContain("#affiliate #planterbag");
+    expect(captionFileText).toContain("https://contoh-affiliate.test/tiktok");
+  });
+
+  it("normalizes legacy nested caption when jobs are fetched", async () => {
+    const form = buildCreateForm({
+      title: "Judul Legacy",
+      description: "Deskripsi Legacy",
+      affiliateLink: "https://contoh-affiliate.test/legacy"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "youtube"
+          ? {
+              ...platform,
+              captionText: JSON.stringify({
+                caption: "Caption bersih dari JSON.",
+                hashtags: [" g", "#Shorts"]
+              }),
+              hashtags: ["#affiliate", "#Shorts"]
+            }
+          : platform
+      )
+    }));
+
+    const jobsResponse = await app.inject({
+      method: "GET",
+      url: "/api/jobs"
+    });
+
+    expect(jobsResponse.statusCode).toBe(200);
+    const jobs = jobsResponse.json();
+    const youtube = jobs[0].platforms.find(
+      (platform: { platformId: string }) => platform.platformId === "youtube"
+    );
+    expect(youtube.captionText).toBe("Caption bersih dari JSON.");
+    expect(youtube.hashtags).toEqual(["#shorts", "#affiliate"]);
+  });
+
+  it("rejects platform action while job is running", async () => {
+    const form = buildCreateForm({
+      title: "Judul Running Platform",
+      description: "Deskripsi Running Platform",
+      affiliateLink: "https://contoh-affiliate.test/running-platform"
+    });
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+    const payload = createResponse.json() as { jobId: string };
+    await jobsStore.update(payload.jobId, (job) => ({
+      ...job,
+      overallStatus: "running",
+      platforms: job.platforms.map((platform) =>
+        platform.platformId === "tiktok" ? { ...platform, status: "running" } : platform
+      )
+    }));
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/jobs/${payload.jobId}/platforms/tiktok/retry-job`
+    });
+
+    expect(response.statusCode).toBe(409);
   });
 
   it("updates editable job metadata", async () => {

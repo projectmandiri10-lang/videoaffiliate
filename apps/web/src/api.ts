@@ -122,6 +122,44 @@ export async function retryPlatform(jobId: string, platformId: PlatformId): Prom
   await parseResponse<{ ok: boolean }>(res);
 }
 
+export async function retryPlatformJob(jobId: string, platformId: PlatformId): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}/platforms/${platformId}/retry-job`, {
+    method: "POST"
+  });
+  await parseResponse<{ ok: boolean }>(res);
+}
+
+export async function retryPlatformCaption(
+  jobId: string,
+  platformId: PlatformId
+): Promise<JobRecord> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}/platforms/${platformId}/retry-caption`, {
+    method: "POST"
+  });
+  return parseResponse<JobRecord>(res);
+}
+
+export async function updatePlatformMetadata(
+  jobId: string,
+  platformId: PlatformId,
+  input: {
+    title: string;
+    description: string;
+    affiliateLink: string;
+    captionText: string;
+    hashtags: string[];
+  }
+): Promise<JobRecord> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}/platforms/${platformId}/metadata`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  return parseResponse<JobRecord>(res);
+}
+
 export async function openPlatformOutputLocation(
   jobId: string,
   platformId: PlatformId

@@ -3,9 +3,11 @@ import {
   createJob,
   deleteJob,
   fetchJobs,
-  retryPlatform,
+  retryPlatformCaption,
+  retryPlatformJob,
   toAbsoluteOutputUrl,
-  updateJob
+  updateJob,
+  updatePlatformMetadata
 } from "../api";
 import type { JobCreationTransition } from "../job-creation";
 import { StatusBadge } from "../components/StatusBadge";
@@ -16,6 +18,20 @@ const PLATFORM_LABEL: Record<PlatformId, string> = {
   youtube: "YouTube Shorts",
   facebook: "Facebook",
   shopee: "Shopee"
+};
+
+const DEFAULT_RENDER_LABEL: Record<PlatformId, string> = {
+  tiktok: "Native Source",
+  youtube: "YouTube Editorial",
+  facebook: "Facebook Story",
+  shopee: "Shopee Sales"
+};
+
+const RENDER_PROFILE_LABEL: Record<string, string> = {
+  native_source: "Native Source",
+  youtube_editorial: "YouTube Editorial",
+  facebook_story: "Facebook Story",
+  shopee_sales: "Shopee Sales"
 };
 
 type PanelMode = "view" | "create" | "edit";
@@ -38,11 +54,27 @@ interface EditFormState {
   affiliateLink: string;
 }
 
+interface PlatformEditFormState {
+  title: string;
+  description: string;
+  affiliateLink: string;
+  captionText: string;
+  hashtagsText: string;
+}
+
 const EMPTY_CREATE_FORM: CreateFormState = {
   video: null,
   title: "",
   description: "",
   affiliateLink: ""
+};
+
+const EMPTY_PLATFORM_EDIT_FORM: PlatformEditFormState = {
+  title: "",
+  description: "",
+  affiliateLink: "",
+  captionText: "",
+  hashtagsText: ""
 };
 
 const EMPTY_EDIT_FORM: EditFormState = {
@@ -79,6 +111,51 @@ function formatRetryCooldown(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function getEffectivePlatformMetadata(
+  job: JobRecord,
+  platform: JobRecord["platforms"][number]
+): {
+  title: string;
+  description: string;
+  affiliateLink: string;
+} {
+  return {
+    title: platform.titleOverride?.trim() || job.title,
+    description: platform.descriptionOverride?.trim() || job.description,
+    affiliateLink: platform.affiliateLinkOverride?.trim() || job.affiliateLink || ""
+  };
+}
+
+function parseHashtagsInput(input: string): string[] {
+  return input
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getRenderProfileLabel(platform: JobRecord["platforms"][number]): string {
+  if (platform.renderProfileId && RENDER_PROFILE_LABEL[platform.renderProfileId]) {
+    return RENDER_PROFILE_LABEL[platform.renderProfileId] ?? DEFAULT_RENDER_LABEL[platform.platformId];
+  }
+  return DEFAULT_RENDER_LABEL[platform.platformId];
+}
+
+function getVisualAuditLabel(platform: JobRecord["platforms"][number]): string | undefined {
+  if (!platform.visualAuditStatus) {
+    return undefined;
+  }
+  if (platform.visualAuditStatus === "skipped") {
+    return platform.platformId === "tiktok" ? "Audit: reference native" : "Audit: skipped";
+  }
+
+  const score =
+    typeof platform.visualAuditScore === "number"
+      ? ` (${platform.visualAuditScore.toFixed(2)})`
+      : "";
+  const boosted = platform.visualAuditBoosted ? " boosted" : "";
+  return `Audit: ${platform.visualAuditStatus}${boosted}${score}`;
 }
 
 function getJobProgress(job: JobRecord): {
@@ -139,8 +216,13 @@ export function JobsPage({
   const [copyInfo, setCopyInfo] = useState("");
   const [createFileInputKey, setCreateFileInputKey] = useState(0);
   const [retryClockMs, setRetryClockMs] = useState(() => Date.now());
+  const [editingPlatformId, setEditingPlatformId] = useState<PlatformId | "">("");
+  const [savingPlatform, setSavingPlatform] = useState(false);
+  const [platformActionKey, setPlatformActionKey] = useState("");
   const [createForm, setCreateForm] = useState<CreateFormState>(EMPTY_CREATE_FORM);
   const [editForm, setEditForm] = useState<EditFormState>(EMPTY_EDIT_FORM);
+  const [platformEditForm, setPlatformEditForm] =
+    useState<PlatformEditFormState>(EMPTY_PLATFORM_EDIT_FORM);
   const selectedJobIdRef = useRef("");
   const jobCreationStateRef = useRef<JobCreationTransition | null>(jobCreationState);
 
@@ -181,6 +263,26 @@ export function JobsPage({
       description: job.description,
       affiliateLink: job.affiliateLink ?? ""
     });
+  };
+
+  const openPlatformEdit = (job: JobRecord, platform: JobRecord["platforms"][number]) => {
+    const metadata = getEffectivePlatformMetadata(job, platform);
+    setEditingPlatformId(platform.platformId);
+    setPlatformEditForm({
+      title: metadata.title,
+      description: metadata.description,
+      affiliateLink: metadata.affiliateLink,
+      captionText: platform.captionText ?? "",
+      hashtagsText: platform.hashtags?.join(" ") ?? ""
+    });
+    setError("");
+    setMessage("");
+  };
+
+  const closePlatformEdit = () => {
+    setEditingPlatformId("");
+    setPlatformEditForm(EMPTY_PLATFORM_EDIT_FORM);
+    setError("");
   };
 
   const refreshJobs = useCallback(async (preferredJobId?: string) => {
@@ -228,6 +330,11 @@ export function JobsPage({
       resetEditForm(selected);
     }
   }, [panelMode, selected?.jobId]);
+
+  useEffect(() => {
+    setEditingPlatformId("");
+    setPlatformEditForm(EMPTY_PLATFORM_EDIT_FORM);
+  }, [selected?.jobId]);
 
   useEffect(() => {
     if (!jobCreationState) {
@@ -280,19 +387,42 @@ export function JobsPage({
     setError("");
   };
 
-  const onRetry = async (platformId: PlatformId) => {
+  const onRetryJob = async (platformId: PlatformId) => {
     if (!selected) {
       return;
     }
     try {
       setError("");
       setMessage("");
-      await retryPlatform(selected.jobId, platformId);
+      setPlatformActionKey(`${platformId}:job`);
+      await retryPlatformJob(selected.jobId, platformId);
       await refreshJobs(selected.jobId);
       setPanelMode("view");
-      setMessage(`Platform ${PLATFORM_LABEL[platformId]} dimasukkan ulang ke antrean.`);
+      setMessage(`Retry Job ${PLATFORM_LABEL[platformId]} dimasukkan ke antrean.`);
     } catch (retryError) {
       setError((retryError as Error).message);
+    } finally {
+      setPlatformActionKey("");
+    }
+  };
+
+  const onRetryCaption = async (platformId: PlatformId) => {
+    if (!selected) {
+      return;
+    }
+    try {
+      setError("");
+      setMessage("");
+      setPlatformActionKey(`${platformId}:caption`);
+      const updated = await retryPlatformCaption(selected.jobId, platformId);
+      setJobs((current) => current.map((job) => (job.jobId === updated.jobId ? updated : job)));
+      await refreshJobs(updated.jobId);
+      setPanelMode("view");
+      setMessage(`Caption ${PLATFORM_LABEL[platformId]} berhasil dibuat ulang.`);
+    } catch (retryError) {
+      setError((retryError as Error).message);
+    } finally {
+      setPlatformActionKey("");
     }
   };
 
@@ -374,6 +504,49 @@ export function JobsPage({
       setError((saveError as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onSavePlatformMetadata = async (
+    event: FormEvent,
+    platformId: PlatformId
+  ) => {
+    event.preventDefault();
+    if (!selected) {
+      return;
+    }
+
+    setMessage("");
+    setError("");
+
+    if (
+      !platformEditForm.title.trim() ||
+      !platformEditForm.description.trim() ||
+      !platformEditForm.affiliateLink.trim() ||
+      !platformEditForm.captionText.trim()
+    ) {
+      setError("Judul, deskripsi, affiliate link, dan caption platform wajib diisi.");
+      return;
+    }
+
+    try {
+      setSavingPlatform(true);
+      const updated = await updatePlatformMetadata(selected.jobId, platformId, {
+        title: platformEditForm.title.trim(),
+        description: platformEditForm.description.trim(),
+        affiliateLink: platformEditForm.affiliateLink.trim(),
+        captionText: platformEditForm.captionText.trim(),
+        hashtags: parseHashtagsInput(platformEditForm.hashtagsText)
+      });
+      setJobs((current) => current.map((job) => (job.jobId === updated.jobId ? updated : job)));
+      await refreshJobs(updated.jobId);
+      setEditingPlatformId("");
+      setPlatformEditForm(EMPTY_PLATFORM_EDIT_FORM);
+      setMessage(`Metadata ${PLATFORM_LABEL[platformId]} berhasil disimpan.`);
+    } catch (saveError) {
+      setError((saveError as Error).message);
+    } finally {
+      setSavingPlatform(false);
     }
   };
 
@@ -809,27 +982,61 @@ export function JobsPage({
                 const outputLinks = getOutputLinks(platform);
                 const retryCooldownMs = getRetryCooldownMs(platform.retryAfter, retryClockMs);
                 const retryDisabled = retryCooldownMs > 0;
+                const metadata = getEffectivePlatformMetadata(selected, platform);
+                const platformBusy =
+                  selected.overallStatus === "running" || platform.status === "running";
+                const retryJobDisabled =
+                  platformBusy || retryDisabled || platform.status === "pending";
+                const retryCaptionDisabled = platformBusy || !platform.scriptText?.trim();
+                const isEditingPlatform = editingPlatformId === platform.platformId;
                 return (
                   <article key={platform.platformId} className="platform-run-card">
                     <div className="platform-run-card__head">
                       <div>
                         <h4>{PLATFORM_LABEL[platform.platformId]}</h4>
+                        <div className="small">Render: {getRenderProfileLabel(platform)}</div>
+                        {getVisualAuditLabel(platform) && (
+                          <div className="small">{getVisualAuditLabel(platform)}</div>
+                        )}
                         <StatusBadge status={platform.status} />
                       </div>
-                      {(platform.status === "failed" || platform.status === "interrupted") && (
-                        <div className="platform-run-card__actions">
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={() => void onRetry(platform.platformId)}
-                            disabled={retryDisabled}
-                          >
-                            {retryDisabled
-                              ? `Retry (${formatRetryCooldown(retryCooldownMs)})`
-                              : "Retry"}
-                          </button>
-                        </div>
-                      )}
+                      <div className="platform-run-card__actions">
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void onRetryCaption(platform.platformId)}
+                          disabled={
+                            retryCaptionDisabled ||
+                            platformActionKey === `${platform.platformId}:caption`
+                          }
+                        >
+                          {platformActionKey === `${platform.platformId}:caption`
+                            ? "Retrying..."
+                            : "Retry Caption"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void onRetryJob(platform.platformId)}
+                          disabled={
+                            retryJobDisabled || platformActionKey === `${platform.platformId}:job`
+                          }
+                        >
+                          {platformActionKey === `${platform.platformId}:job`
+                            ? "Queuing..."
+                            : retryDisabled
+                              ? `Retry Job (${formatRetryCooldown(retryCooldownMs)})`
+                              : "Retry Job"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => openPlatformEdit(selected, platform)}
+                          disabled={platformBusy}
+                        >
+                          Edit
+                        </button>
+                      </div>
                     </div>
 
                     {platform.errorMessage && (
@@ -859,29 +1066,123 @@ export function JobsPage({
                         )}
                       </div>
 
-                      {(platform.captionText || platform.hashtags?.length) && (
-                        <div className="caption-box">
-                          {platform.captionText && (
-                            <p className="break-anywhere">{platform.captionText}</p>
-                          )}
-                          {platform.hashtags?.length ? (
-                            <p className="small break-anywhere">{platform.hashtags.join(" ")}</p>
-                          ) : null}
-                          {selected.affiliateLink && (
-                            <p className="small break-anywhere">{selected.affiliateLink}</p>
-                          )}
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={() =>
-                              void copyToClipboard(
-                                composeCaptionForCopy(platform, selected.affiliateLink)
-                              )
-                            }
-                          >
-                            Copy Caption
-                          </button>
-                        </div>
+                      <div className="caption-box">
+                        {platform.captionText ? (
+                          <p className="break-anywhere">{platform.captionText}</p>
+                        ) : (
+                          <p className="small">Belum ada caption untuk platform ini.</p>
+                        )}
+                        {platform.hashtags?.length ? (
+                          <p className="small break-anywhere">{platform.hashtags.join(" ")}</p>
+                        ) : null}
+                        {metadata.affiliateLink && (
+                          <p className="small break-anywhere">{metadata.affiliateLink}</p>
+                        )}
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() =>
+                            void copyToClipboard(
+                              composeCaptionForCopy(platform, metadata.affiliateLink)
+                            )
+                          }
+                          disabled={!platform.captionText && !platform.hashtags?.length}
+                        >
+                          Copy Caption
+                        </button>
+                      </div>
+
+                      {isEditingPlatform && (
+                        <form
+                          className="platform-edit-form"
+                          onSubmit={(event) =>
+                            void onSavePlatformMetadata(event, platform.platformId)
+                          }
+                        >
+                          <label className="form-field">
+                            <span className="field-kicker">Judul Platform</span>
+                            <input
+                              value={platformEditForm.title}
+                              onChange={(event) =>
+                                setPlatformEditForm((current) => ({
+                                  ...current,
+                                  title: event.target.value
+                                }))
+                              }
+                              disabled={savingPlatform}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-kicker">Deskripsi Platform</span>
+                            <textarea
+                              value={platformEditForm.description}
+                              onChange={(event) =>
+                                setPlatformEditForm((current) => ({
+                                  ...current,
+                                  description: event.target.value
+                                }))
+                              }
+                              disabled={savingPlatform}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-kicker">Affiliate Link Platform</span>
+                            <input
+                              value={platformEditForm.affiliateLink}
+                              onChange={(event) =>
+                                setPlatformEditForm((current) => ({
+                                  ...current,
+                                  affiliateLink: event.target.value
+                                }))
+                              }
+                              disabled={savingPlatform}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-kicker">Caption</span>
+                            <textarea
+                              value={platformEditForm.captionText}
+                              onChange={(event) =>
+                                setPlatformEditForm((current) => ({
+                                  ...current,
+                                  captionText: event.target.value
+                                }))
+                              }
+                              disabled={savingPlatform}
+                            />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-kicker">Hashtags</span>
+                            <input
+                              value={platformEditForm.hashtagsText}
+                              onChange={(event) =>
+                                setPlatformEditForm((current) => ({
+                                  ...current,
+                                  hashtagsText: event.target.value
+                                }))
+                              }
+                              placeholder="#planterbag #affiliate"
+                              disabled={savingPlatform}
+                            />
+                          </label>
+                          <div className="form-actions">
+                            <button
+                              type="submit"
+                              className="primary-button"
+                              disabled={savingPlatform}
+                            >
+                              {savingPlatform ? "Menyimpan..." : "Simpan Platform"}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={closePlatformEdit}
+                              disabled={savingPlatform}
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </form>
                       )}
 
                       {retryDisabled && (
