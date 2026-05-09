@@ -4,15 +4,16 @@ import { MAX_HISTORY } from "../constants.js";
 import type { JobOverallStatus, JobRecord, PlatformRun, PlatformStatus } from "../types.js";
 import { JsonFile } from "../utils/json-file.js";
 import { normalizeJobRecord } from "../utils/job-normalization.js";
+import { resolveStoredJobSource } from "../utils/job-source.js";
 import { JOBS_FILE, UPLOADS_DIR, outputUrlToAbsolutePath } from "../utils/paths.js";
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function listOutputArtifacts(job: JobRecord): string[] {
+function listPlatformArtifacts(platforms: PlatformRun[]): string[] {
   const files = new Set<string>();
-  for (const platform of job.platforms) {
+  for (const platform of platforms) {
     for (const output of [
       ...(platform.artifactPaths || []),
       platform.scriptPath,
@@ -32,12 +33,30 @@ function listOutputArtifacts(job: JobRecord): string[] {
   return [...files];
 }
 
-function listOutputDirectories(job: JobRecord): string[] {
+function listOutputDirectories(filePaths: string[]): string[] {
   const directories = new Set<string>();
-  for (const filePath of listOutputArtifacts(job)) {
+  for (const filePath of filePaths) {
     directories.add(path.dirname(filePath));
   }
   return [...directories];
+}
+
+export async function cleanupPlatformArtifacts(platforms: PlatformRun[]): Promise<void> {
+  const filePaths = listPlatformArtifacts(platforms);
+  await Promise.all(
+    filePaths.map((filePath) => rm(filePath, { recursive: false, force: true }))
+  );
+
+  for (const directory of listOutputDirectories(filePaths)) {
+    try {
+      const entries = await readdir(directory);
+      if (entries.length === 0) {
+        await rm(directory, { recursive: false, force: true });
+      }
+    } catch {
+      // Ignore cleanup errors for empty folder removal.
+    }
+  }
 }
 
 export class JobsStore {
@@ -149,6 +168,54 @@ export class JobsStore {
     await this.file.update((jobs) => jobs.map(normalizeJobRecord));
   }
 
+  public async healSourceVideoPaths(): Promise<number> {
+    const jobs = await this.file.get();
+    const normalizedJobs = jobs.map(normalizeJobRecord);
+    let healedCount = 0;
+    const nextJobs = await Promise.all(
+      normalizedJobs.map(async (job) => {
+        const resolved = await resolveStoredJobSource(job);
+        if (!resolved?.healed) {
+          return job;
+        }
+
+        healedCount += 1;
+        return {
+          ...job,
+          videoPath: resolved.videoPath,
+          videoMimeType: resolved.videoMimeType
+        };
+      })
+    );
+
+    if (healedCount > 0) {
+      await this.file.set(nextJobs);
+    }
+
+    return healedCount;
+  }
+
+  public async ensureSourceVideo(jobId: string): Promise<JobRecord | undefined> {
+    const current = await this.getById(jobId);
+    if (!current) {
+      return undefined;
+    }
+
+    const resolved = await resolveStoredJobSource(current);
+    if (
+      !resolved ||
+      (resolved.videoPath === current.videoPath && resolved.videoMimeType === current.videoMimeType)
+    ) {
+      return current;
+    }
+
+    return await this.update(jobId, (job) => ({
+      ...job,
+      videoPath: resolved.videoPath,
+      videoMimeType: resolved.videoMimeType
+    }));
+  }
+
   public static computeOverallStatus(platforms: PlatformRun[]): JobOverallStatus {
     const done = platforms.filter((platform) => platform.status === "done").length;
     const failed = platforms.filter((platform) => platform.status === "failed").length;
@@ -194,21 +261,7 @@ export class JobsStore {
   }
 
   private async cleanupJobArtifacts(job: JobRecord): Promise<void> {
-    await Promise.all(
-      listOutputArtifacts(job).map((filePath) => rm(filePath, { recursive: false, force: true }))
-    );
-
+    await cleanupPlatformArtifacts(job.platforms);
     await rm(path.join(UPLOADS_DIR, job.jobId), { recursive: true, force: true });
-
-    for (const directory of listOutputDirectories(job)) {
-      try {
-        const entries = await readdir(directory);
-        if (entries.length === 0) {
-          await rm(directory, { recursive: false, force: true });
-        }
-      } catch {
-        // Ignore cleanup errors for empty folder removal.
-      }
-    }
   }
 }

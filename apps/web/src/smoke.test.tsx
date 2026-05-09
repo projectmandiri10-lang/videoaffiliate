@@ -16,6 +16,7 @@ vi.mock("./api", async () => {
     fetchTtsVoices: vi.fn(),
     openPlatformOutputLocation: vi.fn(),
     previewTtsVoice: vi.fn(),
+    replaceJobSource: vi.fn(),
     retryPlatform: vi.fn(),
     retryPlatformCaption: vi.fn(),
     retryPlatformJob: vi.fn(),
@@ -329,10 +330,11 @@ describe("web smoke", () => {
       throw new Error("Edit button not found");
     }
     fireEvent.click(editButton);
-    fireEvent.change(screen.getByLabelText("Caption"), {
+    await screen.findByRole("button", { name: /simpan platform/i });
+    fireEvent.change(screen.getByDisplayValue("Caption bersih."), {
       target: { value: "Caption edit." }
     });
-    fireEvent.change(screen.getByLabelText("Hashtags"), {
+    fireEvent.change(screen.getByDisplayValue("#affiliate"), {
       target: { value: "#edit" }
     });
     fireEvent.click(screen.getByRole("button", { name: /simpan platform/i }));
@@ -346,5 +348,107 @@ describe("web smoke", () => {
         hashtags: ["#edit"]
       });
     });
+  });
+
+  it("replaces job source and clears stale output links", async () => {
+    const job = {
+      jobId: "job-source",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      title: "Job Source",
+      description: "Deskripsi Job Source",
+      affiliateLink: "https://contoh-affiliate.test/job-source",
+      videoPath: "C:/uploads/job-source/source.mp4",
+      videoMimeType: "video/mp4",
+      videoDurationSec: 21,
+      overallStatus: "partial_success" as const,
+      platforms: [
+        {
+          platformId: "tiktok" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          mp4Path: "/outputs/tiktok/job-source.mp4",
+          captionPath: "/outputs/tiktok/job-source-caption.txt",
+          captionText: "Caption lama.",
+          hashtags: ["#lama"],
+          artifactPaths: [
+            "/outputs/tiktok/job-source.mp4",
+            "/outputs/tiktok/job-source-caption.txt"
+          ]
+        },
+        {
+          platformId: "youtube" as const,
+          status: "failed" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          artifactPaths: []
+        },
+        {
+          platformId: "facebook" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          artifactPaths: []
+        },
+        {
+          platformId: "shopee" as const,
+          status: "done" as const,
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          artifactPaths: []
+        }
+      ]
+    };
+    const updatedJob = {
+      ...job,
+      updatedAt: "2026-04-02T00:00:00.000Z",
+      videoPath: "C:/uploads/job-source/source.webm",
+      videoMimeType: "video/webm",
+      videoDurationSec: 18,
+      overallStatus: "failed" as const,
+      platforms: job.platforms.map((platform) => ({
+        ...platform,
+        status: "failed" as const,
+        errorMessage: "Source video diganti. Klik Retry Job untuk membuat output baru.",
+        mp4Path: undefined,
+        captionPath: undefined,
+        captionText: undefined,
+        hashtags: undefined,
+        artifactPaths: []
+      }))
+    };
+    vi.mocked(api.fetchJobs).mockResolvedValueOnce([job]).mockResolvedValue([updatedJob]);
+    vi.mocked(api.replaceJobSource).mockResolvedValue(updatedJob);
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
+
+    expect(await screen.findByRole("button", { name: /ganti source/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "MP4" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /ganti source/i }));
+
+    const fileInput = await screen.findByLabelText(/video source baru/i);
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["new-video"], "replacement.webm", { type: "video/webm" })]
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /simpan source baru/i }));
+
+    await waitFor(() => {
+      expect(api.replaceJobSource).toHaveBeenCalledWith(
+        "job-source",
+        expect.objectContaining({
+          name: "replacement.webm"
+        })
+      );
+    });
+    expect(
+      await screen.findByText(
+        /Source utama berhasil diganti. Output lama dibersihkan, lalu gunakan Retry Job per platform untuk render ulang./i
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "MP4" })).toBeNull();
+    expect(screen.getAllByText(/Klik Retry Job untuk membuat output baru./i).length).toBeGreaterThan(
+      0
+    );
   });
 });

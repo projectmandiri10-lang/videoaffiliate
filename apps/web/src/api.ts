@@ -104,6 +104,16 @@ export async function updateJob(
   return parseResponse<JobRecord>(res);
 }
 
+export async function replaceJobSource(jobId: string, video: File): Promise<JobRecord> {
+  const form = new FormData();
+  form.append("video", video);
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}/source`, {
+    method: "PUT",
+    body: form
+  });
+  return parseResponse<JobRecord>(res);
+}
+
 export async function deleteJob(jobId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
     method: "DELETE"

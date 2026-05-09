@@ -7,7 +7,7 @@ import Fastify, {
   type FastifyReply
 } from "fastify";
 import { createWriteStream } from "node:fs";
-import { access, mkdir, readFile, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import mime from "mime-types";
@@ -20,7 +20,7 @@ import {
   findTtsVoiceByName
 } from "./constants.js";
 import { getRenderProfileIdForPlatform, pickRenderVariantKey } from "./render-config.js";
-import { JobsStore } from "./stores/jobs-store.js";
+import { JobsStore, cleanupPlatformArtifacts } from "./stores/jobs-store.js";
 import { SettingsStore } from "./stores/settings-store.js";
 import type { GenerateSpeechInput, JobRecord, PlatformId } from "./types.js";
 import {
@@ -41,6 +41,7 @@ import type { IJobProcessor } from "./services/job-processor.js";
 import { openPathInExplorer } from "./utils/open-location.js";
 import { writeWav24kMono } from "./utils/audio.js";
 import { normalizeApiError } from "./utils/api-error.js";
+import { guessVideoMimeType } from "./utils/job-source.js";
 import { pruneVoicePreviewFiles } from "./utils/voice-preview.js";
 import { normalizeSocialMetadata } from "./utils/model-output.js";
 import { writeCaptionArtifactForPlatform } from "./utils/caption-artifact.js";
@@ -105,6 +106,10 @@ function isJobEditable(job: JobRecord): boolean {
 
 function isJobDeletable(job: JobRecord): boolean {
   return job.overallStatus !== "running";
+}
+
+function isJobSourceReplaceable(job: JobRecord): boolean {
+  return ["success", "partial_success", "failed", "interrupted"].includes(job.overallStatus);
 }
 
 function canRunPlatformAction(job: JobRecord, platform: JobRecord["platforms"][number]): boolean {
@@ -179,6 +184,43 @@ function clearRetryablePlatformState(
     artifactPaths: [],
     updatedAt: nowIso()
   };
+}
+
+const SOURCE_REPLACED_MESSAGE = "Source video diganti. Klik Retry Job untuk membuat output baru.";
+
+function createSourceReplacedPlatformState(
+  platform: JobRecord["platforms"][number]
+): JobRecord["platforms"][number] {
+  return {
+    ...clearRetryablePlatformState(platform),
+    status: "failed",
+    errorMessage: SOURCE_REPLACED_MESSAGE,
+    updatedAt: nowIso()
+  };
+}
+
+async function cleanupUploadSideArtifacts(
+  jobId: string,
+  preservedPaths: string[] = []
+): Promise<void> {
+  const uploadDir = path.join(UPLOADS_DIR, jobId);
+  const preserved = new Set(preservedPaths.map((item) => path.resolve(item)));
+  let entries: string[];
+  try {
+    entries = await readdir(uploadDir);
+  } catch {
+    return;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const targetPath = path.join(uploadDir, entry);
+      if (preserved.has(path.resolve(targetPath))) {
+        return;
+      }
+      await rm(targetPath, { recursive: true, force: true });
+    })
+  );
 }
 
 async function maybeRegisterWebStatic(app: FastifyInstance): Promise<void> {
@@ -397,6 +439,119 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return reply.send(updated);
     } catch (error) {
       return sendNormalizedError(reply, error, "Gagal memperbarui job.");
+    }
+  });
+
+  app.put("/api/jobs/:jobId/source", async (request, reply) => {
+    const params = request.params as { jobId: string };
+    let job;
+    try {
+      job = await options.jobsStore.getById(params.jobId);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal memuat job.");
+    }
+    if (!job) {
+      return reply.code(404).send({ message: "Job tidak ditemukan." });
+    }
+    if (!isJobSourceReplaceable(job)) {
+      return reply.code(409).send({
+        message: "Source video hanya bisa diganti saat job statusnya success, partial_success, failed, atau interrupted."
+      });
+    }
+
+    const parts = (
+      request as unknown as {
+        parts: () => AsyncIterable<MultipartFile | any>;
+      }
+    ).parts();
+    const uploadDir = path.join(UPLOADS_DIR, params.jobId);
+    let tempUploadPath = "";
+    let nextMimeType = "video/mp4";
+
+    const cleanupTempUpload = async () => {
+      if (!tempUploadPath) {
+        return;
+      }
+      const currentTempPath = tempUploadPath;
+      tempUploadPath = "";
+      await rm(currentTempPath, { recursive: false, force: true });
+    };
+
+    try {
+      for await (const part of parts) {
+        if (part.type === "file" && part.fieldname === "video") {
+          await mkdir(uploadDir, { recursive: true });
+          const extension = pickVideoExtension(part);
+          tempUploadPath = path.join(uploadDir, `source-replacement-${Date.now()}${extension}`);
+          nextMimeType = part.mimetype || guessVideoMimeType(tempUploadPath, "video/mp4");
+          await pipeline(part.file, createWriteStream(tempUploadPath));
+          continue;
+        }
+        if (part.type === "file") {
+          part.file.resume();
+        }
+      }
+
+      if (!tempUploadPath) {
+        return reply.code(400).send({ message: "File video wajib diisi." });
+      }
+
+      const settings = await options.settingsStore.get();
+      const durationSec = await durationProbe(tempUploadPath);
+      if (durationSec > settings.maxVideoSeconds) {
+        return reply.code(400).send({
+          message: `Durasi video ${durationSec.toFixed(2)}s melebihi batas ${settings.maxVideoSeconds}s.`
+        });
+      }
+
+      const nextSourcePath = path.join(uploadDir, `source${path.extname(tempUploadPath) || ".mp4"}`);
+      nextMimeType = guessVideoMimeType(nextSourcePath, nextMimeType);
+
+      await copyFile(tempUploadPath, nextSourcePath);
+      tempUploadPath = "";
+
+      try {
+        await cleanupPlatformArtifacts(job.platforms);
+      } catch (cleanupError) {
+        options.logger.warn(
+          { err: cleanupError, jobId: params.jobId },
+          "Gagal membersihkan output lama saat ganti source."
+        );
+      }
+
+      try {
+        await cleanupUploadSideArtifacts(params.jobId, [nextSourcePath]);
+      } catch (cleanupError) {
+        options.logger.warn(
+          { err: cleanupError, jobId: params.jobId },
+          "Gagal membersihkan cache upload lama saat ganti source."
+        );
+      }
+
+      const updated = await options.jobsStore.update(params.jobId, (current) => {
+        const nextPlatforms = current.platforms.map((platform) =>
+          createSourceReplacedPlatformState(platform)
+        );
+        return {
+          ...current,
+          videoPath: nextSourcePath,
+          videoMimeType: nextMimeType,
+          videoDurationSec: durationSec,
+          updatedAt: nowIso(),
+          overallStatus: JobsStore.computeOverallStatus(nextPlatforms),
+          platforms: nextPlatforms
+        };
+      });
+
+      if (!updated) {
+        return reply.code(404).send({ message: "Job tidak ditemukan." });
+      }
+
+      return reply.send(updated);
+    } catch (error) {
+      return sendNormalizedError(reply, error, "Gagal mengganti source video job.");
+    } finally {
+      await cleanupTempUpload();
     }
   });
 

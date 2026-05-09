@@ -3,6 +3,7 @@ import {
   createJob,
   deleteJob,
   fetchJobs,
+  replaceJobSource,
   retryPlatformCaption,
   retryPlatformJob,
   toAbsoluteOutputUrl,
@@ -34,7 +35,7 @@ const RENDER_PROFILE_LABEL: Record<string, string> = {
   shopee_sales: "Shopee Sales"
 };
 
-type PanelMode = "view" | "create" | "edit";
+type PanelMode = "view" | "create" | "edit" | "source";
 
 interface JobsPageProps {
   jobCreationState?: JobCreationTransition | null;
@@ -62,6 +63,10 @@ interface PlatformEditFormState {
   hashtagsText: string;
 }
 
+interface SourceFormState {
+  video: File | null;
+}
+
 const EMPTY_CREATE_FORM: CreateFormState = {
   video: null,
   title: "",
@@ -83,12 +88,20 @@ const EMPTY_EDIT_FORM: EditFormState = {
   affiliateLink: ""
 };
 
+const EMPTY_SOURCE_FORM: SourceFormState = {
+  video: null
+};
+
 function isJobEditable(job: JobRecord): boolean {
   return ["queued", "failed", "interrupted"].includes(job.overallStatus);
 }
 
 function isJobDeletable(job: JobRecord): boolean {
   return job.overallStatus !== "running";
+}
+
+function isJobSourceReplaceable(job: JobRecord): boolean {
+  return !["queued", "running"].includes(job.overallStatus);
 }
 
 function getRetryCooldownMs(retryAfter?: string, nowMs = Date.now()): number {
@@ -210,17 +223,20 @@ export function JobsPage({
   const [jobsLoading, setJobsLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [replacingSource, setReplacingSource] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [copyInfo, setCopyInfo] = useState("");
   const [createFileInputKey, setCreateFileInputKey] = useState(0);
+  const [sourceFileInputKey, setSourceFileInputKey] = useState(0);
   const [retryClockMs, setRetryClockMs] = useState(() => Date.now());
   const [editingPlatformId, setEditingPlatformId] = useState<PlatformId | "">("");
   const [savingPlatform, setSavingPlatform] = useState(false);
   const [platformActionKey, setPlatformActionKey] = useState("");
   const [createForm, setCreateForm] = useState<CreateFormState>(EMPTY_CREATE_FORM);
   const [editForm, setEditForm] = useState<EditFormState>(EMPTY_EDIT_FORM);
+  const [sourceForm, setSourceForm] = useState<SourceFormState>(EMPTY_SOURCE_FORM);
   const [platformEditForm, setPlatformEditForm] =
     useState<PlatformEditFormState>(EMPTY_PLATFORM_EDIT_FORM);
   const selectedJobIdRef = useRef("");
@@ -251,6 +267,11 @@ export function JobsPage({
   const resetCreateForm = () => {
     setCreateForm(EMPTY_CREATE_FORM);
     setCreateFileInputKey((current) => current + 1);
+  };
+
+  const resetSourceForm = () => {
+    setSourceForm(EMPTY_SOURCE_FORM);
+    setSourceFileInputKey((current) => current + 1);
   };
 
   const resetEditForm = (job: JobRecord | null) => {
@@ -329,11 +350,15 @@ export function JobsPage({
     if (panelMode === "edit") {
       resetEditForm(selected);
     }
+    if (panelMode === "source") {
+      resetSourceForm();
+    }
   }, [panelMode, selected?.jobId]);
 
   useEffect(() => {
     setEditingPlatformId("");
     setPlatformEditForm(EMPTY_PLATFORM_EDIT_FORM);
+    resetSourceForm();
   }, [selected?.jobId]);
 
   useEffect(() => {
@@ -378,6 +403,16 @@ export function JobsPage({
     }
     resetEditForm(selected);
     setPanelMode("edit");
+    setError("");
+    setMessage("");
+  };
+
+  const openSourcePanel = () => {
+    if (!selected || !isJobSourceReplaceable(selected)) {
+      return;
+    }
+    resetSourceForm();
+    setPanelMode("source");
     setError("");
     setMessage("");
   };
@@ -507,6 +542,37 @@ export function JobsPage({
     }
   };
 
+  const onReplaceSource = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selected) {
+      return;
+    }
+
+    setMessage("");
+    setError("");
+
+    if (!sourceForm.video) {
+      setError("Video source baru wajib dipilih.");
+      return;
+    }
+
+    try {
+      setReplacingSource(true);
+      const updated = await replaceJobSource(selected.jobId, sourceForm.video);
+      setJobs((current) => current.map((job) => (job.jobId === updated.jobId ? updated : job)));
+      resetSourceForm();
+      await refreshJobs(updated.jobId);
+      setPanelMode("view");
+      setMessage(
+        "Source utama berhasil diganti. Output lama dibersihkan, lalu gunakan Retry Job per platform untuk render ulang."
+      );
+    } catch (replaceError) {
+      setError((replaceError as Error).message);
+    } finally {
+      setReplacingSource(false);
+    }
+  };
+
   const onSavePlatformMetadata = async (
     event: FormEvent,
     platformId: PlatformId
@@ -603,6 +669,8 @@ export function JobsPage({
 
   const canEditSelected = selected ? isJobEditable(selected) : false;
   const canDeleteSelected = selected ? isJobDeletable(selected) : false;
+  const canReplaceSourceSelected = selected ? isJobSourceReplaceable(selected) : false;
+  const selectedSourceFilename = selected ? selected.videoPath.split(/[\\/]/).pop() || "-" : "-";
 
   return (
     <section className="page-shell jobs-page">
@@ -616,8 +684,7 @@ export function JobsPage({
             <p className="eyebrow">Control Room</p>
             <h2>Jobs Dashboard</h2>
             <p className="section-note">
-              Pantau antrean, output, dan retry tiap platform tanpa mengubah file hasil yang sudah
-              ada.
+              Pantau antrean, output, retry, metadata, dan source utama video per job.
             </p>
           </div>
           <div className="form-actions">
@@ -686,6 +753,8 @@ export function JobsPage({
                 ? "Buat Job Baru"
                 : panelMode === "edit"
                   ? "Edit Job"
+                  : panelMode === "source"
+                    ? "Ganti Source Job"
                   : "Detail Job"}
             </h3>
             <p className="section-note">
@@ -693,6 +762,8 @@ export function JobsPage({
                 ? "Satu job akan memproses semua platform sekaligus."
                 : panelMode === "edit"
                   ? "Ubah metadata job yang dipilih."
+                  : panelMode === "source"
+                    ? "Ganti source utama untuk semua platform lalu render ulang manual per platform."
                   : "Lihat detail, output, dan aksi retry untuk job terpilih."}
             </p>
           </div>
@@ -705,6 +776,11 @@ export function JobsPage({
             {panelMode === "view" && selected && canEditSelected && (
               <button type="button" className="secondary-button" onClick={openEditPanel}>
                 Edit Job
+              </button>
+            )}
+            {panelMode === "view" && selected && canReplaceSourceSelected && (
+              <button type="button" className="secondary-button" onClick={openSourcePanel}>
+                Ganti Source
               </button>
             )}
             {panelMode === "view" && selected && (
@@ -927,6 +1003,68 @@ export function JobsPage({
                     disabled={saving}
                   >
                     Reset Form
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
+        {panelMode === "source" && selected && (
+          <div className="section-card glass-panel">
+            <div className="meta-grid">
+              <div className="meta-card">
+                <strong>Job ID</strong>
+                <div className="break-anywhere">#{selected.jobId}</div>
+              </div>
+              <div className="meta-card">
+                <strong>Source Saat Ini</strong>
+                <div className="break-anywhere">{selectedSourceFilename}</div>
+              </div>
+              <div className="meta-card">
+                <strong>Durasi Saat Ini</strong>
+                <div>{selected.videoDurationSec.toFixed(2)} detik</div>
+              </div>
+            </div>
+
+            {!canReplaceSourceSelected && (
+              <p className="section-note">
+                Source video tidak bisa diganti saat job masih queued atau running.
+              </p>
+            )}
+
+            {canReplaceSourceSelected && (
+              <form onSubmit={onReplaceSource} className="grid-form">
+                <p className="section-note">
+                  Mengganti source utama akan membersihkan output lama untuk TikTok, YouTube,
+                  Facebook, dan Shopee. Setelah disimpan, gunakan `Retry Job` pada tiap platform
+                  untuk membuat hasil baru.
+                </p>
+                <label className="form-field">
+                  <span className="field-kicker">Video Source Baru</span>
+                  <input
+                    key={sourceFileInputKey}
+                    type="file"
+                    accept="video/*"
+                    onChange={(event) =>
+                      setSourceForm({
+                        video: event.target.files?.[0] ?? null
+                      })
+                    }
+                    disabled={replacingSource}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button type="submit" className="primary-button" disabled={replacingSource}>
+                    {replacingSource ? "Mengganti..." : "Simpan Source Baru"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={closePanel}
+                    disabled={replacingSource}
+                  >
+                    Batal
                   </button>
                 </div>
               </form>

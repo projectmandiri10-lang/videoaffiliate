@@ -353,7 +353,7 @@ export class JobProcessor implements IJobProcessor {
   }
 
   private async processItem(item: QueueItem): Promise<void> {
-    const job = await this.jobsStore.getById(item.jobId);
+    const job = await this.jobsStore.ensureSourceVideo(item.jobId);
     if (!job) {
       return;
     }

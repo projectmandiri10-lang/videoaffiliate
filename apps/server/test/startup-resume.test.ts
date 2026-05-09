@@ -1,9 +1,12 @@
 import pino from "pino";
+import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it } from "vitest";
 import { PLATFORM_ORDER } from "../src/constants.js";
 import { resumeIncompleteJobs } from "../src/services/startup-resume.js";
 import { JobsStore } from "../src/stores/jobs-store.js";
 import type { JobRecord, PlatformId } from "../src/types.js";
+import { UPLOADS_DIR } from "../src/utils/paths.js";
 import { resetTestStorage } from "./helpers.js";
 
 function buildPlatform(platformId: PlatformId, status: JobRecord["platforms"][number]["status"]) {
@@ -131,5 +134,53 @@ describe("startup resume", () => {
 
     expect(resumedCount).toBe(0);
     expect(enqueueCalls).toEqual([]);
+  });
+
+  it("heals legacy source path to local uploads folder before resume", async () => {
+    const jobId = "resume-heal-job";
+    const healedSourcePath = path.join(UPLOADS_DIR, jobId, "source.mp4");
+    await mkdir(path.dirname(healedSourcePath), { recursive: true });
+    await writeFile(healedSourcePath, "fake-video", "utf8");
+
+    const job: JobRecord = {
+      jobId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      title: "Heal Source Job",
+      description: "Job lama dengan videoPath dari laptop lain.",
+      affiliateLink: "https://contoh-affiliate.test/heal-source",
+      videoPath: `C:\\Users\\LENOVO\\Documents\\POS\\VIDEO AFFILIATE\\uploads\\${jobId}\\source.mp4`,
+      videoMimeType: "video/mp4",
+      videoDurationSec: 15,
+      overallStatus: "queued",
+      platforms: [
+        buildPlatform("tiktok", "pending"),
+        buildPlatform("youtube", "pending"),
+        buildPlatform("facebook", "done"),
+        buildPlatform("shopee", "done")
+      ]
+    };
+    await jobsStore.create(job);
+
+    const healedCount = await jobsStore.healSourceVideoPaths();
+    const enqueueCalls: Array<{ jobId: string; platformIds?: PlatformId[] }> = [];
+    const processor = {
+      enqueue(nextJobId: string, platformIds?: PlatformId[]) {
+        enqueueCalls.push({ jobId: nextJobId, platformIds });
+      }
+    };
+
+    const resumedCount = await resumeIncompleteJobs(jobsStore, processor, logger);
+    const healedJob = await jobsStore.getById(jobId);
+
+    expect(healedCount).toBe(1);
+    expect(healedJob?.videoPath).toBe(healedSourcePath);
+    expect(resumedCount).toBe(1);
+    expect(enqueueCalls).toEqual([
+      {
+        jobId,
+        platformIds: ["tiktok", "youtube"]
+      }
+    ]);
   });
 });

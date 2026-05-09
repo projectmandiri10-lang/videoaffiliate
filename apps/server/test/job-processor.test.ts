@@ -255,6 +255,75 @@ describe("job processor", () => {
     expect(youtubeRenderCalls[1]).toEqual(expect.objectContaining({ auditBoost: true }));
   });
 
+  it("auto-heals legacy source path before processing queued platform", async () => {
+    const jobId = "job-processor-heal-source";
+    const uploadDir = path.join(UPLOADS_DIR, jobId);
+    const healedVideoPath = path.join(uploadDir, "source.mp4");
+    await mkdir(uploadDir, { recursive: true });
+    await writeFile(healedVideoPath, "fake-video", "utf8");
+
+    const job: JobRecord = {
+      jobId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      title: "Produk Legacy",
+      description: "Job lama dengan path source dari mesin sebelumnya.",
+      affiliateLink: "https://contoh-affiliate.test/legacy-source",
+      videoPath: `C:\\Users\\LENOVO\\Documents\\POS\\VIDEO AFFILIATE\\uploads\\${jobId}\\source.mp4`,
+      videoMimeType: "video/mp4",
+      videoDurationSec: 18,
+      overallStatus: "queued",
+      platforms: PLATFORM_ORDER.map((platformId) => ({
+        platformId,
+        status: "pending",
+        artifactPaths: [],
+        updatedAt: new Date().toISOString()
+      }))
+    };
+    await jobsStore.create(job);
+
+    const aiService = {
+      uploadVideo: vi.fn(async () => ({
+        fileId: "mock-video",
+        filename: "source.mp4",
+        mimeType: "video/mp4"
+      })),
+      generateScript: vi.fn(async () => "Script healed source."),
+      generateSocialMetadata: vi.fn(async () => ({
+        caption: "Caption healed source.",
+        hashtags: ["#heal"]
+      }))
+    };
+    const speechGenerator = {
+      generateSpeech: vi.fn(async () => ({
+        data: Buffer.from("audio"),
+        mimeType: "audio/wav"
+      }))
+    };
+
+    const processor = new JobProcessor(
+      jobsStore,
+      settingsStore,
+      aiService as never,
+      speechGenerator,
+      logger
+    );
+
+    processor.enqueue(jobId, ["tiktok"]);
+    await processor.whenIdle();
+
+    const updated = await jobsStore.getById(jobId);
+    expect(updated?.videoPath).toBe(healedVideoPath);
+    expect(aiService.uploadVideo).toHaveBeenCalledWith(
+      healedVideoPath,
+      "video/mp4",
+      DEFAULT_SETTINGS.scriptModel
+    );
+    expect(updated?.platforms.find((platform) => platform.platformId === "tiktok")?.status).toBe(
+      "done"
+    );
+  });
+
   it("fails a non-TikTok platform when boosted render still fails visual audit", async () => {
     const jobId = "job-processor-visual-fail";
     const uploadDir = path.join(UPLOADS_DIR, jobId);

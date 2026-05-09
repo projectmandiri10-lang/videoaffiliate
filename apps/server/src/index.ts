@@ -19,6 +19,7 @@ async function bootstrap(): Promise<void> {
   const jobsStore = new JobsStore();
   await jobsStore.markRunningAsInterrupted();
   await jobsStore.normalizeAll();
+  const healedSourceCount = await jobsStore.healSourceVideoPaths();
 
   const snifox = new SnifoxService(env.snifoxApiBase, env.snifoxApiKey, logger);
   const liteLlmTts = new LiteLlmTtsService(env.litellmBaseUrl, env.litellmSecretKey, logger);
@@ -47,6 +48,12 @@ async function bootstrap(): Promise<void> {
   });
 
   logger.info(`Server berjalan di http://localhost:${env.port}`);
+  if (healedSourceCount > 0) {
+    logger.info(
+      { healedSourceCount },
+      "Path source job lama diperbaiki ke folder uploads lokal."
+    );
+  }
   if (resumedCount > 0) {
     logger.info({ resumedCount }, "Job yang belum selesai sudah dimasukkan lagi ke antrean.");
   }
