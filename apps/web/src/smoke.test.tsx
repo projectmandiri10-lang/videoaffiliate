@@ -154,12 +154,12 @@ describe("web smoke", () => {
         videoPath: "C:/video.mp4",
         videoMimeType: "video/mp4",
         videoDurationSec: 20,
-        overallStatus: "failed",
+        overallStatus: "running",
         platforms: [
           {
             platformId: "tiktok",
-            status: "failed",
-            updatedAt: "2026-04-01T00:00:00.000Z",
+            status: "running",
+            updatedAt: "2026-05-10T10:00:00.000Z",
             errorMessage: "fetch failed",
             retryAfter: "2099-04-01T00:00:00.000Z",
             artifactPaths: []
@@ -195,9 +195,8 @@ describe("web smoke", () => {
     expect(screen.getByText("TikTok")).toBeTruthy();
     expect(screen.getByText("Shopee")).toBeTruthy();
     expect(screen.getByRole("button", { name: /hapus job/i })).toBeTruthy();
-    expect(
-      (screen.getByRole("button", { name: /retry job \(/i }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    expect(screen.getByRole("progressbar", { name: /progress render tiktok/i })).toBeTruthy();
+    expect(screen.getAllByText(/progress render/i).length).toBeGreaterThan(0);
   });
 
   it("hides legacy srt links and shows only mp4 plus caption outputs", async () => {

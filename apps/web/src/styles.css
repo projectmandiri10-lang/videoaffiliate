@@ -690,6 +690,44 @@ select:focus {
   gap: 12px;
 }
 
+.platform-progress {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 255, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(15, 255, 255, 0.07), rgba(223, 0, 255, 0.04)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.platform-progress__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.platform-progress__meta strong,
+.platform-progress__percent {
+  font-size: 0.88rem;
+}
+
+.platform-progress__percent {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.platform-progress__track {
+  height: 10px;
+}
+
+.platform-progress__detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .platform-run-card__actions {
   display: flex;
   flex-wrap: wrap;

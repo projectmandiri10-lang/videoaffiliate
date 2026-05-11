@@ -213,6 +213,44 @@ function getJobProgress(job: JobRecord): {
   };
 }
 
+function formatElapsedRenderTime(elapsedMs: number): string {
+  const totalSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds} detik`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes} menit` : `${minutes} menit ${seconds} detik`;
+}
+
+function getPlatformRenderProgress(
+  platform: JobRecord["platforms"][number],
+  nowMs = Date.now()
+): {
+  percent: number;
+  detail: string;
+} | null {
+  if (platform.status !== "running") {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(platform.updatedAt);
+  const elapsedMs = Number.isFinite(startedAtMs) ? Math.max(0, nowMs - startedAtMs) : 0;
+  const minPercent = 12;
+  const maxPercent = 94;
+  const progressRatio = 1 - Math.exp(-elapsedMs / 45_000);
+  const percent = Math.round(minPercent + (maxPercent - minPercent) * progressRatio);
+
+  return {
+    percent: Math.max(minPercent, Math.min(percent, maxPercent)),
+    detail:
+      elapsedMs < 1_500
+        ? "Render baru dimulai."
+        : `Render berjalan sekitar ${formatElapsedRenderTime(elapsedMs)}.`
+  };
+}
+
 export function JobsPage({
   jobCreationState = null,
   onJobCreationStateHandled
@@ -1121,6 +1159,7 @@ export function JobsPage({
                 const retryCooldownMs = getRetryCooldownMs(platform.retryAfter, retryClockMs);
                 const retryDisabled = retryCooldownMs > 0;
                 const metadata = getEffectivePlatformMetadata(selected, platform);
+                const platformProgress = getPlatformRenderProgress(platform, retryClockMs);
                 const platformBusy =
                   selected.overallStatus === "running" || platform.status === "running";
                 const retryJobDisabled =
@@ -1182,6 +1221,31 @@ export function JobsPage({
                     )}
 
                     <div className="platform-run-card__body">
+                      {platformProgress && (
+                        <div className="platform-progress">
+                          <div className="platform-progress__meta">
+                            <strong>Progress Render</strong>
+                            <span className="platform-progress__percent">
+                              {platformProgress.percent}%
+                            </span>
+                          </div>
+                          <div
+                            className="job-progress-track platform-progress__track"
+                            role="progressbar"
+                            aria-label={`Progress render ${PLATFORM_LABEL[platform.platformId]}`}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={platformProgress.percent}
+                          >
+                            <div
+                              className="job-progress-fill is-animated"
+                              style={{ width: `${platformProgress.percent}%` }}
+                            />
+                          </div>
+                          <p className="platform-progress__detail">{platformProgress.detail}</p>
+                        </div>
+                      )}
+
                       <div>
                         <p className="small">
                           {outputLinks.length
