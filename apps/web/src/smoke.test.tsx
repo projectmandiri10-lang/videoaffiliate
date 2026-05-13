@@ -27,7 +27,7 @@ vi.mock("./api", async () => {
 });
 
 const mockSettings = {
-  scriptModel: "google/gemini-3-flash-preview",
+  scriptModel: "gemini/gemini-2.5-flash-image",
   ttsModel: "vertex_ai/gemini-2.5-flash-tts",
   language: "id-ID" as const,
   maxVideoSeconds: 60,

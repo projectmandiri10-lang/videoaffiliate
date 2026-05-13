@@ -16,6 +16,7 @@ import { SettingsStore } from "../src/stores/settings-store.js";
 import type { JobRecord } from "../src/types.js";
 import { OUTPUTS_DIR, UPLOADS_DIR, outputUrlToAbsolutePath } from "../src/utils/paths.js";
 import { renderPlatformVideo } from "../src/utils/render-video.js";
+import { extractAnalysisFrames } from "../src/utils/video.js";
 import { compareVideoVisualDifference } from "../src/utils/visual-audit.js";
 import { resetTestStorage } from "./helpers.js";
 
@@ -53,6 +54,12 @@ vi.mock("../src/utils/video.js", async () => {
   );
   return {
     ...actual,
+    extractAnalysisFrames: vi.fn(async () => [
+      {
+        dataUrl: "https://contoh.test/frame-01.jpg",
+        timestampSec: 2.7
+      }
+    ]),
     probeVideoMetadata: vi.fn(async () => ({
       durationSec: 18,
       width: 1080,
@@ -83,6 +90,7 @@ describe("job processor", () => {
   beforeEach(async () => {
     await resetTestStorage();
     await settingsStore.set(DEFAULT_SETTINGS);
+    vi.mocked(extractAnalysisFrames).mockClear();
     vi.mocked(renderPlatformVideo).mockClear();
     vi.mocked(compareVideoVisualDifference).mockClear();
     vi.mocked(compareVideoVisualDifference).mockResolvedValue({
@@ -120,11 +128,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(async () => ({
-        fileId: "mock-video",
-        filename: "source.mp4",
-        mimeType: "video/mp4"
-      })),
       generateScript: vi.fn(async () => "Ini script untuk sabun jerawat yang singkat dan jelas."),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption sabun jerawat.",
@@ -208,11 +211,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(async () => ({
-        fileId: "mock-video",
-        filename: "source.mp4",
-        mimeType: "video/mp4"
-      })),
       generateScript: vi.fn(async () => "Ini script audit visual yang cukup jelas untuk video."),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption audit.",
@@ -283,11 +281,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(async () => ({
-        fileId: "mock-video",
-        filename: "source.mp4",
-        mimeType: "video/mp4"
-      })),
       generateScript: vi.fn(async () => "Script healed source."),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption healed source.",
@@ -314,11 +307,7 @@ describe("job processor", () => {
 
     const updated = await jobsStore.getById(jobId);
     expect(updated?.videoPath).toBe(healedVideoPath);
-    expect(aiService.uploadVideo).toHaveBeenCalledWith(
-      healedVideoPath,
-      "video/mp4",
-      DEFAULT_SETTINGS.scriptModel
-    );
+    expect(vi.mocked(extractAnalysisFrames)).toHaveBeenCalledWith(healedVideoPath, 18);
     expect(updated?.platforms.find((platform) => platform.platformId === "tiktok")?.status).toBe(
       "done"
     );
@@ -355,11 +344,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(async () => ({
-        fileId: "mock-video",
-        filename: "source.mp4",
-        mimeType: "video/mp4"
-      })),
       generateScript: vi.fn(async () => "Ini script audit visual yang tetap mirip."),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption audit gagal.",
@@ -517,11 +501,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(async () => ({
-        fileId: "mock-video",
-        filename: "source.mp4",
-        mimeType: "video/mp4"
-      })),
       generateScript: vi.fn(async () => scriptText),
       generateSocialMetadata: vi.fn(async () => ({
         caption: captionText,
@@ -546,7 +525,7 @@ describe("job processor", () => {
     processor.enqueue(jobId, ["tiktok"]);
     await processor.whenIdle();
 
-    expect(aiService.uploadVideo).not.toHaveBeenCalled();
+    expect(vi.mocked(extractAnalysisFrames)).not.toHaveBeenCalled();
     expect(aiService.generateScript).not.toHaveBeenCalled();
     expect(aiService.generateSocialMetadata).not.toHaveBeenCalled();
     expect(speechGenerator.generateSpeech).not.toHaveBeenCalled();
@@ -618,7 +597,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(),
       generateScript: vi.fn(),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption baru.",
@@ -640,7 +618,7 @@ describe("job processor", () => {
     const updated = await processor.retryCaption(jobId, "tiktok");
     const tiktok = updated.platforms.find((platform) => platform.platformId === "tiktok");
 
-    expect(aiService.uploadVideo).not.toHaveBeenCalled();
+    expect(vi.mocked(extractAnalysisFrames)).not.toHaveBeenCalled();
     expect(aiService.generateScript).not.toHaveBeenCalled();
     expect(speechGenerator.generateSpeech).not.toHaveBeenCalled();
     expect(renderPlatformVideo).not.toHaveBeenCalled();
@@ -734,11 +712,6 @@ describe("job processor", () => {
     await jobsStore.create(job);
 
     const aiService = {
-      uploadVideo: vi.fn(async () => ({
-        fileId: "mock-video",
-        filename: "source.mp4",
-        mimeType: "video/mp4"
-      })),
       generateScript: vi.fn(async () => "Script baru force fresh."),
       generateSocialMetadata: vi.fn(async () => ({
         caption: "Caption baru force fresh.",
@@ -763,7 +736,7 @@ describe("job processor", () => {
     processor.enqueue(jobId, ["tiktok"], { forceFresh: true });
     await processor.whenIdle();
 
-    expect(aiService.uploadVideo).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(extractAnalysisFrames)).toHaveBeenCalledTimes(1);
     expect(aiService.generateScript).toHaveBeenCalledTimes(1);
     expect(aiService.generateSocialMetadata).toHaveBeenCalledTimes(1);
     expect(speechGenerator.generateSpeech).toHaveBeenCalledTimes(1);

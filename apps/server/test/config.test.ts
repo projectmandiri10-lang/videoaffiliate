@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadEnv } from "../src/config.js";
 
 const ORIGINAL_ENV = {
-  SNIFOX_API_BASE: process.env.SNIFOX_API_BASE,
-  SNIFOX_API_KEY: process.env.SNIFOX_API_KEY,
   LITELLM_BASE_URL: process.env.LITELLM_BASE_URL,
   LITELLM_SECRET_KEY: process.env.LITELLM_SECRET_KEY,
   GEMINI_TTS_API_KEY: process.env.GEMINI_TTS_API_KEY,
@@ -13,18 +11,6 @@ const ORIGINAL_ENV = {
 };
 
 function resetEnv() {
-  if (ORIGINAL_ENV.SNIFOX_API_BASE === undefined) {
-    delete process.env.SNIFOX_API_BASE;
-  } else {
-    process.env.SNIFOX_API_BASE = ORIGINAL_ENV.SNIFOX_API_BASE;
-  }
-
-  if (ORIGINAL_ENV.SNIFOX_API_KEY === undefined) {
-    delete process.env.SNIFOX_API_KEY;
-  } else {
-    process.env.SNIFOX_API_KEY = ORIGINAL_ENV.SNIFOX_API_KEY;
-  }
-
   if (ORIGINAL_ENV.LITELLM_BASE_URL === undefined) {
     delete process.env.LITELLM_BASE_URL;
   } else {
@@ -67,33 +53,7 @@ describe("loadEnv", () => {
     resetEnv();
   });
 
-  it("normalizes SnifoxAI base URL to /v1", () => {
-    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com";
-    process.env.SNIFOX_API_KEY = "snfx-test";
-    process.env.LITELLM_BASE_URL = "http://localhost:4000";
-    process.env.LITELLM_SECRET_KEY = "litellm-secret";
-    process.env.PORT = "8787";
-    process.env.WEB_ORIGIN = "http://localhost:5173";
-
-    const env = loadEnv();
-    expect(env.snifoxApiBase).toBe("https://core.snifoxai.com/v1");
-  });
-
-  it("keeps base URL with existing /v1 path", () => {
-    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1/";
-    process.env.SNIFOX_API_KEY = "snfx-test";
-    process.env.LITELLM_BASE_URL = "http://localhost:4000/v1/";
-    process.env.LITELLM_SECRET_KEY = "litellm-secret";
-    process.env.PORT = "8787";
-    process.env.WEB_ORIGIN = "http://localhost:5173";
-
-    const env = loadEnv();
-    expect(env.snifoxApiBase).toBe("https://core.snifoxai.com/v1");
-  });
-
   it("normalizes LiteLLM base URL to /v1", () => {
-    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
-    process.env.SNIFOX_API_KEY = "snfx-test";
     process.env.LITELLM_BASE_URL = "http://localhost:4000/";
     process.env.LITELLM_SECRET_KEY = "litellm-secret";
     process.env.PORT = "8787";
@@ -103,25 +63,17 @@ describe("loadEnv", () => {
     expect(env.litellmBaseUrl).toBe("http://localhost:4000/v1");
   });
 
-  it("throws when SnifoxAI env is missing", () => {
-    delete process.env.SNIFOX_API_BASE;
-    delete process.env.SNIFOX_API_KEY;
-    delete process.env.LITELLM_BASE_URL;
-    delete process.env.LITELLM_SECRET_KEY;
-    delete process.env.GEMINI_TTS_API_KEY;
-    delete process.env.GEMINI_API_KEY;
+  it("keeps base URL with existing /v1 path", () => {
+    process.env.LITELLM_BASE_URL = "http://localhost:4000/v1/";
+    process.env.LITELLM_SECRET_KEY = "litellm-secret";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
-    expect(() => loadEnv()).toThrow(/SNIFOX_API_BASE tidak ditemukan/i);
-
-    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
-    expect(() => loadEnv()).toThrow(/SNIFOX_API_KEY tidak ditemukan/i);
+    const env = loadEnv();
+    expect(env.litellmBaseUrl).toBe("http://localhost:4000/v1");
   });
 
-  it("requires LiteLLM env for voice-over", () => {
-    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
-    process.env.SNIFOX_API_KEY = "snfx-test";
+  it("throws when LiteLLM env is missing", () => {
     delete process.env.LITELLM_BASE_URL;
     delete process.env.LITELLM_SECRET_KEY;
     delete process.env.GEMINI_TTS_API_KEY;
@@ -130,11 +82,12 @@ describe("loadEnv", () => {
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
     expect(() => loadEnv()).toThrow(/LITELLM_BASE_URL tidak ditemukan/i);
+
+    process.env.LITELLM_BASE_URL = "http://localhost:4000/v1";
+    expect(() => loadEnv()).toThrow(/LITELLM_SECRET_KEY tidak ditemukan/i);
   });
 
-  it("does not use legacy Gemini env as fallback for TTS", () => {
-    process.env.SNIFOX_API_BASE = "https://core.snifoxai.com/v1";
-    process.env.SNIFOX_API_KEY = "snfx-test";
+  it("does not use legacy Gemini env as fallback", () => {
     delete process.env.LITELLM_BASE_URL;
     delete process.env.LITELLM_SECRET_KEY;
     process.env.GEMINI_API_KEY = "gemini-legacy-test";

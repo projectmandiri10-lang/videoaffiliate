@@ -6,8 +6,6 @@ import { DEFAULT_PORT } from "./constants.js";
 dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 
 export interface AppEnv {
-  snifoxApiBase: string;
-  snifoxApiKey: string;
   litellmBaseUrl: string;
   litellmSecretKey: string;
   port: number;
@@ -29,14 +27,6 @@ function normalizeOpenAiCompatibleBase(input: string, envName: string, example: 
   return url.toString().replace(/\/$/, "");
 }
 
-function normalizeSnifoxBase(input: string): string {
-  return normalizeOpenAiCompatibleBase(
-    input,
-    "SNIFOX_API_BASE",
-    "https://core.snifoxai.com/v1"
-  );
-}
-
 function normalizeLiteLlmBase(input: string): string {
   return normalizeOpenAiCompatibleBase(
     input,
@@ -46,8 +36,6 @@ function normalizeLiteLlmBase(input: string): string {
 }
 
 export function loadEnv(): AppEnv {
-  const snifoxApiBaseRaw = process.env.SNIFOX_API_BASE?.trim() ?? "";
-  const snifoxApiKey = process.env.SNIFOX_API_KEY?.trim() ?? "";
   const litellmBaseUrlRaw = process.env.LITELLM_BASE_URL?.trim() ?? "";
   const litellmSecretKey = process.env.LITELLM_SECRET_KEY?.trim() ?? "";
   const portRaw = process.env.PORT?.trim();
@@ -57,27 +45,15 @@ export function loadEnv(): AppEnv {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
-  if (!snifoxApiBaseRaw) {
-    throw new Error(
-      "SNIFOX_API_BASE tidak ditemukan. Isi file .env berdasarkan .env.example."
-    );
-  }
-
-  if (!snifoxApiKey) {
-    throw new Error(
-      "SNIFOX_API_KEY tidak ditemukan. Isi file .env berdasarkan .env.example."
-    );
-  }
-
   if (!litellmBaseUrlRaw) {
     throw new Error(
-      "LITELLM_BASE_URL tidak ditemukan. Isi endpoint LiteLLM OpenAI-compatible untuk voice-over."
+      "LITELLM_BASE_URL tidak ditemukan. Isi endpoint LiteLLM OpenAI-compatible untuk script, caption, dan voice-over."
     );
   }
 
   if (!litellmSecretKey) {
     throw new Error(
-      "LITELLM_SECRET_KEY tidak ditemukan. Isi secret LiteLLM untuk voice-over."
+      "LITELLM_SECRET_KEY tidak ditemukan. Isi secret LiteLLM untuk akses model."
     );
   }
 
@@ -92,8 +68,6 @@ export function loadEnv(): AppEnv {
   }
 
   return {
-    snifoxApiBase: normalizeSnifoxBase(snifoxApiBaseRaw),
-    snifoxApiKey,
     litellmBaseUrl: normalizeLiteLlmBase(litellmBaseUrlRaw),
     litellmSecretKey,
     port,

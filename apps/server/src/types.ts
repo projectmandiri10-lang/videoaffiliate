@@ -88,17 +88,15 @@ export interface JobRecord {
   platforms: PlatformRun[];
 }
 
-export interface UploadedModelFile {
-  fileId?: string;
-  filename: string;
-  mimeType: string;
-  inlineDataBase64?: string;
+export interface AnalysisFrame {
+  dataUrl: string;
+  timestampSec: number;
 }
 
 export interface GenerateScriptInput {
   model: string;
   prompt: string;
-  video: UploadedModelFile;
+  frames: AnalysisFrame[];
 }
 
 export interface GenerateSpeechInput {
@@ -138,11 +136,6 @@ export interface GenerateSocialMetadataInput {
 }
 
 export interface AIService {
-  uploadVideo(
-    filePath: string,
-    mimeType: string,
-    targetModel: string
-  ): Promise<UploadedModelFile>;
   generateScript(input: GenerateScriptInput): Promise<string>;
   generateSocialMetadata(input: GenerateSocialMetadataInput): Promise<SocialMetadata>;
 }

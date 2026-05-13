@@ -2,8 +2,8 @@ import { buildApp } from "./app.js";
 import { loadEnv } from "./config.js";
 import { FallbackSpeechGenerator } from "./services/fallback-speech-generator.js";
 import { JobProcessor } from "./services/job-processor.js";
+import { LiteLlmContentService } from "./services/litellm-content-service.js";
 import { LiteLlmTtsService } from "./services/litellm-tts-service.js";
-import { SnifoxService } from "./services/snifox-service.js";
 import { resumeIncompleteJobs } from "./services/startup-resume.js";
 import { WindowsTtsService } from "./services/windows-tts-service.js";
 import { JobsStore } from "./stores/jobs-store.js";
@@ -21,14 +21,18 @@ async function bootstrap(): Promise<void> {
   await jobsStore.normalizeAll();
   const healedSourceCount = await jobsStore.healSourceVideoPaths();
 
-  const snifox = new SnifoxService(env.snifoxApiBase, env.snifoxApiKey, logger);
+  const contentService = new LiteLlmContentService(
+    env.litellmBaseUrl,
+    env.litellmSecretKey,
+    logger
+  );
   const liteLlmTts = new LiteLlmTtsService(env.litellmBaseUrl, env.litellmSecretKey, logger);
   const windowsTts = new WindowsTtsService(logger);
   const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, liteLlmTts);
   const processor = new JobProcessor(
     jobsStore,
     settingsStore,
-    snifox,
+    contentService,
     speechGenerator,
     logger
   );

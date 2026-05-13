@@ -1,17 +1,13 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import ffmpegPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+import type { AnalysisFrame } from "../types.js";
 
-const MAX_MODEL_UPLOAD_BYTES = 8 * 1024 * 1024;
-
-interface AnalysisVideoVariant {
-  crf: number;
-  fps: number;
-  scale: string;
-}
+const ANALYSIS_FRAME_RATIOS = [0.15, 0.38, 0.62, 0.85];
+const ANALYSIS_FRAME_MAX_WIDTH = 768;
 
 interface FfprobeStream {
   codec_type?: string;
@@ -30,20 +26,6 @@ interface FfprobeJsonOutput {
   format?: {
     duration?: string;
   };
-}
-
-const ANALYSIS_VIDEO_VARIANTS: AnalysisVideoVariant[] = [
-  { crf: 35, fps: 2, scale: "360:-2" },
-  { crf: 38, fps: 1, scale: "288:-2" },
-  { crf: 40, fps: 1, scale: "240:-2" }
-];
-
-export interface PreparedModelVideo {
-  filePath: string;
-  mimeType: string;
-  originalBytes: number;
-  uploadBytes: number;
-  compressed: boolean;
 }
 
 export interface ProbedVideoMetadata {
@@ -242,81 +224,62 @@ async function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
-function analysisVideoPathFor(filePath: string): string {
-  const parsed = path.parse(filePath);
-  return path.join(path.dirname(filePath), "_analysis", `${parsed.name}-snifox-analysis.mp4`);
+function toFrameTimestamp(durationSec: number, ratio: number): number {
+  const maxTimestamp = Math.max(0, durationSec - 0.1);
+  const rawTimestamp = Math.max(0, Math.min(maxTimestamp, durationSec * ratio));
+  return Number(rawTimestamp.toFixed(3));
 }
 
-async function transcodeAnalysisVideo(
+async function extractFrameToJpeg(
   sourcePath: string,
   outputPath: string,
-  variant: AnalysisVideoVariant
-): Promise<number> {
+  timestampSec: number
+): Promise<void> {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await runFfmpeg([
     "-y",
+    "-ss",
+    timestampSec.toFixed(3),
     "-i",
     sourcePath,
+    "-frames:v",
+    "1",
     "-vf",
-    `fps=${variant.fps},scale=${variant.scale}`,
-    "-an",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    String(variant.crf),
-    "-movflags",
-    "+faststart",
+    `scale='min(${ANALYSIS_FRAME_MAX_WIDTH},iw)':-2`,
+    "-q:v",
+    "3",
     outputPath
   ]);
-  return (await stat(outputPath)).size;
 }
 
-export async function prepareVideoForModelUpload(
+function buildFrameOutputPath(filePath: string, index: number): string {
+  return path.join(path.dirname(filePath), "_analysis", `frame-${String(index + 1).padStart(2, "0")}.jpg`);
+}
+
+function buildAnalysisTimestamps(durationSec: number): number[] {
+  const unique = new Set<number>();
+  for (const ratio of ANALYSIS_FRAME_RATIOS) {
+    unique.add(toFrameTimestamp(durationSec, ratio));
+  }
+  return [...unique];
+}
+
+export async function extractAnalysisFrames(
   filePath: string,
-  mimeType: string
-): Promise<PreparedModelVideo> {
-  const originalBytes = (await stat(filePath)).size;
-  if (originalBytes <= MAX_MODEL_UPLOAD_BYTES) {
-    return {
-      filePath,
-      mimeType,
-      originalBytes,
-      uploadBytes: originalBytes,
-      compressed: false
-    };
+  durationSec: number
+): Promise<AnalysisFrame[]> {
+  const timestamps = buildAnalysisTimestamps(durationSec);
+  const frames: AnalysisFrame[] = [];
+
+  for (const [index, timestampSec] of timestamps.entries()) {
+    const outputPath = buildFrameOutputPath(filePath, index);
+    await extractFrameToJpeg(filePath, outputPath, timestampSec);
+    const imageBuffer = await readFile(outputPath);
+    frames.push({
+      dataUrl: `data:image/jpeg;base64,${imageBuffer.toString("base64")}`,
+      timestampSec
+    });
   }
 
-  const outputPath = analysisVideoPathFor(filePath);
-  try {
-    const existingBytes = (await stat(outputPath)).size;
-    if (existingBytes > 0 && existingBytes <= MAX_MODEL_UPLOAD_BYTES) {
-      return {
-        filePath: outputPath,
-        mimeType: "video/mp4",
-        originalBytes,
-        uploadBytes: existingBytes,
-        compressed: true
-      };
-    }
-  } catch {
-    // Tidak ada cache video analisis; buat baru di bawah.
-  }
-
-  let uploadBytes = 0;
-  for (const variant of ANALYSIS_VIDEO_VARIANTS) {
-    uploadBytes = await transcodeAnalysisVideo(filePath, outputPath, variant);
-    if (uploadBytes <= MAX_MODEL_UPLOAD_BYTES) {
-      break;
-    }
-  }
-
-  return {
-    filePath: outputPath,
-    mimeType: "video/mp4",
-    originalBytes,
-    uploadBytes,
-    compressed: true
-  };
+  return frames;
 }

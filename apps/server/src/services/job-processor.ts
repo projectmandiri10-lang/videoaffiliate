@@ -4,6 +4,7 @@ import path from "node:path";
 import type { FastifyBaseLogger } from "fastify";
 import type {
   AIService,
+  AnalysisFrame,
   AppSettings,
   JobRecord,
   PlatformId,
@@ -31,7 +32,7 @@ import { resolveVersionedBaseName } from "../utils/filename.js";
 import { writeCaptionArtifactForPlatform } from "../utils/caption-artifact.js";
 import { getEffectivePlatformMetadata } from "../utils/job-normalization.js";
 import { buildSrt } from "../utils/srt.js";
-import { probeVideoMetadata } from "../utils/video.js";
+import { extractAnalysisFrames, probeVideoMetadata } from "../utils/video.js";
 import { compareVideoVisualDifference } from "../utils/visual-audit.js";
 import {
   buildRateLimitErrorMessage,
@@ -369,7 +370,7 @@ export class JobProcessor implements IJobProcessor {
       updatedAt: nowIso()
     }));
 
-    const requiresUploadedVideo = selectedPlatformIds.some((platformId) => {
+    const requiresAnalysisFrames = selectedPlatformIds.some((platformId) => {
       const platformSettings = findPlatformSettings(settings, platformId);
       if (!platformSettings?.enabled) {
         return false;
@@ -380,26 +381,6 @@ export class JobProcessor implements IJobProcessor {
       const previousPlatform = job.platforms.find((platform) => platform.platformId === platformId);
       return this.needsFreshScript(job, settings, platformId, previousPlatform);
     });
-
-    let uploadedVideo;
-    if (requiresUploadedVideo) {
-      try {
-        uploadedVideo = await this.aiService.uploadVideo(
-          job.videoPath,
-          job.videoMimeType,
-          settings.scriptModel
-        );
-      } catch (error) {
-        const message = this.toErrorMessage(error);
-        await this.markPlatformsFailed(
-          item.jobId,
-          selectedPlatformIds,
-          message,
-          buildRetryAfter(error)
-        );
-        return;
-      }
-    }
 
     let sourceVideoMetadata;
     try {
@@ -413,6 +394,22 @@ export class JobProcessor implements IJobProcessor {
         buildRetryAfter(error)
       );
       return;
+    }
+
+    let analysisFrames: AnalysisFrame[] = [];
+    if (requiresAnalysisFrames) {
+      try {
+        analysisFrames = await extractAnalysisFrames(job.videoPath, sourceVideoMetadata.durationSec);
+      } catch (error) {
+        const message = this.toErrorMessage(error);
+        await this.markPlatformsFailed(
+          item.jobId,
+          selectedPlatformIds,
+          message,
+          buildRetryAfter(error)
+        );
+        return;
+      }
     }
 
     for (const platformId of selectedPlatformIds) {
@@ -482,11 +479,7 @@ export class JobProcessor implements IJobProcessor {
           (await this.aiService.generateScript({
             model: settings.scriptModel,
             prompt: scriptPrompt,
-            video:
-              uploadedVideo ?? {
-                filename: path.basename(job.videoPath),
-                mimeType: job.videoMimeType
-              }
+            frames: analysisFrames
           }));
 
         if (!cachedScriptText) {
@@ -931,7 +924,7 @@ export class JobProcessor implements IJobProcessor {
 
   private toErrorMessage(error: unknown): string {
     if (isRateLimitError(error)) {
-      return `${buildRateLimitErrorMessage(error)} Cek quota/key SnifoxAI Anda atau tunggu reset limit.`;
+      return `${buildRateLimitErrorMessage(error)} Cek quota, budget, atau key LiteLLM/provider Anda lalu coba lagi.`;
     }
     return extractErrorMessage(error);
   }
