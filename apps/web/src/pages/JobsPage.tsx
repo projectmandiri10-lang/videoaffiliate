@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   createJob,
   deleteJob,
+  fetchSettings,
   fetchJobs,
   replaceJobSource,
   retryPlatformCaption,
@@ -10,16 +11,11 @@ import {
   updateJob,
   updatePlatformMetadata
 } from "../api";
+import { PlatformSelector } from "../components/PlatformSelector";
 import type { JobCreationTransition } from "../job-creation";
+import { getEnabledPlatformIds, PLATFORM_LABEL, PLATFORM_ORDER, normalizePlatformIds } from "../platforms";
 import { StatusBadge } from "../components/StatusBadge";
 import type { JobRecord, PlatformId } from "../types";
-
-const PLATFORM_LABEL: Record<PlatformId, string> = {
-  tiktok: "TikTok",
-  youtube: "YouTube Shorts",
-  facebook: "Facebook",
-  shopee: "Shopee"
-};
 
 const DEFAULT_RENDER_LABEL: Record<PlatformId, string> = {
   tiktok: "Native Source",
@@ -272,6 +268,8 @@ export function JobsPage({
   const [editingPlatformId, setEditingPlatformId] = useState<PlatformId | "">("");
   const [savingPlatform, setSavingPlatform] = useState(false);
   const [platformActionKey, setPlatformActionKey] = useState("");
+  const [availablePlatformIds, setAvailablePlatformIds] = useState<PlatformId[]>(PLATFORM_ORDER);
+  const [selectedPlatformIds, setSelectedPlatformIds] = useState<PlatformId[]>(PLATFORM_ORDER);
   const [createForm, setCreateForm] = useState<CreateFormState>(EMPTY_CREATE_FORM);
   const [editForm, setEditForm] = useState<EditFormState>(EMPTY_EDIT_FORM);
   const [sourceForm, setSourceForm] = useState<SourceFormState>(EMPTY_SOURCE_FORM);
@@ -279,6 +277,7 @@ export function JobsPage({
     useState<PlatformEditFormState>(EMPTY_PLATFORM_EDIT_FORM);
   const selectedJobIdRef = useRef("");
   const jobCreationStateRef = useRef<JobCreationTransition | null>(jobCreationState);
+  const createPlatformSelectionTouchedRef = useRef(false);
 
   const selected = useMemo(() => {
     if (!jobs.length) {
@@ -301,6 +300,32 @@ export function JobsPage({
   useEffect(() => {
     jobCreationStateRef.current = jobCreationState;
   }, [jobCreationState]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPlatformDefaults = async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!active) {
+          return;
+        }
+        const enabledPlatformIds = getEnabledPlatformIds(settings);
+        setAvailablePlatformIds(enabledPlatformIds);
+        if (!createPlatformSelectionTouchedRef.current) {
+          setSelectedPlatformIds(enabledPlatformIds);
+        }
+      } catch {
+        // Keep local defaults when settings cannot be loaded.
+      }
+    };
+
+    void loadPlatformDefaults();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const resetCreateForm = () => {
     setCreateForm(EMPTY_CREATE_FORM);
@@ -509,6 +534,20 @@ export function JobsPage({
     }
   };
 
+  const onToggleCreatePlatform = (platformId: PlatformId) => {
+    if (creating || !availablePlatformIds.includes(platformId)) {
+      return;
+    }
+    createPlatformSelectionTouchedRef.current = true;
+    setSelectedPlatformIds((current) =>
+      normalizePlatformIds(
+        current.includes(platformId)
+          ? current.filter((item) => item !== platformId)
+          : [...current, platformId]
+      )
+    );
+  };
+
   const onCreate = async (event: FormEvent) => {
     event.preventDefault();
     setMessage("");
@@ -523,6 +562,10 @@ export function JobsPage({
       setError("Video, judul, deskripsi, dan affiliate link wajib diisi.");
       return;
     }
+    if (!selectedPlatformIds.length) {
+      setError("Pilih minimal satu platform tujuan.");
+      return;
+    }
 
     try {
       setCreating(true);
@@ -530,7 +573,8 @@ export function JobsPage({
         video: createForm.video,
         title: createForm.title.trim(),
         description: createForm.description.trim(),
-        affiliateLink: createForm.affiliateLink.trim()
+        affiliateLink: createForm.affiliateLink.trim(),
+        platformIds: selectedPlatformIds
       });
       resetCreateForm();
       await refreshJobs(result.jobId);
@@ -797,7 +841,7 @@ export function JobsPage({
             </h3>
             <p className="section-note">
               {panelMode === "create"
-                ? "Satu job akan memproses semua platform sekaligus."
+                ? "Satu job hanya akan memproses platform yang Anda pilih."
                 : panelMode === "edit"
                   ? "Ubah metadata job yang dipilih."
                   : panelMode === "source"
@@ -946,9 +990,15 @@ export function JobsPage({
                   disabled={creating}
                 />
               </label>
+              <PlatformSelector
+                selectedPlatformIds={selectedPlatformIds}
+                availablePlatformIds={availablePlatformIds}
+                disabled={creating}
+                onTogglePlatform={onToggleCreatePlatform}
+              />
               <div className="form-actions">
                 <button type="submit" className="primary-button" disabled={creating}>
-                  {creating ? "Membuat..." : "Generate All Platforms"}
+                  {creating ? "Membuat..." : "Generate Platform Terpilih"}
                 </button>
                 <button
                   type="button"

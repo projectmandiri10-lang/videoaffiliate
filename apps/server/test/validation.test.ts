@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "../src/constants.js";
-import { parseRetryPlatformId, parseSettings } from "../src/validation.js";
+import { parseRetryPlatformId, parseSelectedPlatformIds, parseSettings } from "../src/validation.js";
 
 describe("validation", () => {
   it("accepts valid settings", () => {
@@ -38,6 +38,17 @@ describe("validation", () => {
   it("validates retry platform id", () => {
     expect(parseRetryPlatformId({ platformId: "shopee" })).toBe("shopee");
     expect(() => parseRetryPlatformId({ platformId: "unknown" })).toThrow();
+  });
+
+  it("parses selected platform ids from JSON string", () => {
+    expect(parseSelectedPlatformIds('["youtube","tiktok","youtube"]')).toEqual([
+      "tiktok",
+      "youtube"
+    ]);
+  });
+
+  it("rejects empty selected platform ids", () => {
+    expect(() => parseSelectedPlatformIds("[]")).toThrow();
   });
 
   it("fills CTA defaults for legacy settings shape", () => {

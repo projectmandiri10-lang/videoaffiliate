@@ -16,6 +16,7 @@ function buildCreateForm(overrides?: {
   title?: string;
   description?: string;
   affiliateLink?: string;
+  platformIds?: PlatformId[];
 }) {
   const form = new FormData();
   form.append("video", Buffer.from("fake-video-data"), {
@@ -29,6 +30,9 @@ function buildCreateForm(overrides?: {
       "affiliateLink",
       overrides?.affiliateLink ?? "https://contoh-affiliate.test/abc"
     );
+  }
+  if (overrides?.platformIds) {
+    form.append("platformIds", JSON.stringify(overrides.platformIds));
   }
   return form;
 }
@@ -149,6 +153,25 @@ describe("api integration", () => {
     const saved = await jobsStore.getById(payload.jobId);
     expect(saved?.affiliateLink).toBe("https://contoh-affiliate.test/abc");
     expect(saved?.platforms.map((platform) => platform.platformId)).toEqual(PLATFORM_ORDER);
+  });
+
+  it("creates a job only for selected platforms", async () => {
+    const form = buildCreateForm({
+      platformIds: ["tiktok", "shopee"]
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: form.getBuffer(),
+      headers: form.getHeaders()
+    });
+
+    expect(response.statusCode).toBe(202);
+    const payload = response.json() as { jobId: string };
+    expect(enqueueCalls[0]?.platformIds).toEqual(["tiktok", "shopee"]);
+    const saved = await jobsStore.getById(payload.jobId);
+    expect(saved?.platforms.map((platform) => platform.platformId)).toEqual(["tiktok", "shopee"]);
   });
 
   it("rejects create job if affiliateLink is missing", async () => {

@@ -63,12 +63,14 @@ export async function createJob(input: {
   title: string;
   description: string;
   affiliateLink: string;
+  platformIds: PlatformId[];
 }): Promise<{ jobId: string; status: string }> {
   const form = new FormData();
   form.append("video", input.video);
   form.append("title", input.title);
   form.append("description", input.description);
   form.append("affiliateLink", input.affiliateLink);
+  form.append("platformIds", JSON.stringify(input.platformIds));
   const res = await fetch(`${API_BASE}/api/jobs`, {
     method: "POST",
     body: form

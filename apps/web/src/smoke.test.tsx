@@ -132,14 +132,53 @@ describe("web smoke", () => {
   it("shows generate form validation before submit", async () => {
     render(<GeneratePage />);
 
-    expect(await screen.findByRole("button", { name: /generate all platforms/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /generate platform terpilih/i })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /generate all platforms/i }));
+    fireEvent.click(screen.getByRole("button", { name: /generate platform terpilih/i }));
 
     expect(
       await screen.findByText(/Video, judul, deskripsi, dan affiliate link wajib diisi./i)
     ).toBeTruthy();
     expect(api.createJob).not.toHaveBeenCalled();
+  });
+
+  it("submits only selected platforms from generate page", async () => {
+    vi.mocked(api.createJob).mockResolvedValue({
+      jobId: "job-platform-choice",
+      status: "queued"
+    });
+
+    render(<GeneratePage />);
+
+    fireEvent.change(await screen.findByLabelText("Video"), {
+      target: {
+        files: [new File(["video"], "promo.mp4", { type: "video/mp4" })]
+      }
+    });
+    fireEvent.change(screen.getByLabelText("Judul"), {
+      target: { value: "Promo Pilihan" }
+    });
+    fireEvent.change(screen.getByLabelText("Deskripsi"), {
+      target: { value: "Deskripsi pilihan platform" }
+    });
+    fireEvent.change(screen.getByLabelText("Affiliate Link"), {
+      target: { value: "https://contoh-affiliate.test/pilihan" }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /youtube shorts/i }));
+    fireEvent.click(screen.getByRole("button", { name: /facebook/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /generate platform terpilih/i }));
+
+    await waitFor(() => {
+      expect(api.createJob).toHaveBeenCalledWith({
+        video: expect.objectContaining({ name: "promo.mp4" }),
+        title: "Promo Pilihan",
+        description: "Deskripsi pilihan platform",
+        affiliateLink: "https://contoh-affiliate.test/pilihan",
+        platformIds: ["tiktok", "shopee"]
+      });
+    });
   });
 
   it("renders jobs page with multi-platform detail rows", async () => {

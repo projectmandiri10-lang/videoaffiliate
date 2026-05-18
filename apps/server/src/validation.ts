@@ -26,6 +26,29 @@ const ctaSequenceSchema = z.object({
   shopee: z.number().int().min(0).default(0)
 });
 
+const createJobPlatformIdsSchema = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+}, z.array(platformIdSchema).min(1, "Pilih minimal satu platform.")).transform((platformIds) => {
+  const unique = new Set(platformIds);
+  return PLATFORM_ORDER.filter((platformId) => unique.has(platformId));
+});
+
 export const settingsSchema = z.object({
   scriptModel: z.string().trim().min(1),
   ttsModel: z.string().trim().min(1),
@@ -87,6 +110,10 @@ export function parseSettings(input: unknown): AppSettings {
 export function parseRetryPlatformId(input: unknown): PlatformId {
   const parsed = retrySchema.parse(input);
   return parsed.platformId;
+}
+
+export function parseSelectedPlatformIds(input: unknown): PlatformId[] {
+  return createJobPlatformIdsSchema.parse(input);
 }
 
 export function parseJobUpdateInput(input: unknown): {

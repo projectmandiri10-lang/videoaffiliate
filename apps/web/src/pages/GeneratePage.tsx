@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
-import { createJob } from "../api";
+import { createJob, fetchSettings } from "../api";
+import { PlatformSelector } from "../components/PlatformSelector";
 import type { JobCreationTransition } from "../job-creation";
+import { getEnabledPlatformIds, PLATFORM_ORDER, normalizePlatformIds } from "../platforms";
+import type { PlatformId } from "../types";
 
 interface GeneratePageProps {
   onSubmissionStateChange?: (transition: JobCreationTransition) => void;
@@ -11,15 +14,37 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [affiliateLink, setAffiliateLink] = useState("");
+  const [availablePlatformIds, setAvailablePlatformIds] = useState<PlatformId[]>(PLATFORM_ORDER);
+  const [selectedPlatformIds, setSelectedPlatformIds] = useState<PlatformId[]>(PLATFORM_ORDER);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const mountedRef = useRef(true);
+  const platformSelectionTouchedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
+
+    const loadPlatformDefaults = async () => {
+      try {
+        const settings = await fetchSettings();
+        if (!mountedRef.current) {
+          return;
+        }
+        const enabledPlatformIds = getEnabledPlatformIds(settings);
+        setAvailablePlatformIds(enabledPlatformIds);
+        if (!platformSelectionTouchedRef.current) {
+          setSelectedPlatformIds(enabledPlatformIds);
+        }
+      } catch {
+        // Keep frontend usable with default platform list when settings cannot be loaded.
+      }
+    };
+
+    void loadPlatformDefaults();
+
     return () => {
       mountedRef.current = false;
     };
@@ -42,6 +67,10 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
       setError("Video, judul, deskripsi, dan affiliate link wajib diisi.");
       return;
     }
+    if (!selectedPlatformIds.length) {
+      setError("Pilih minimal satu platform tujuan.");
+      return;
+    }
 
     setLoading(true);
     const requestId = Date.now();
@@ -60,7 +89,8 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
         video,
         title: trimmedTitle,
         description: trimmedDescription,
-        affiliateLink: trimmedAffiliateLink
+        affiliateLink: trimmedAffiliateLink,
+        platformIds: selectedPlatformIds
       });
       if (mountedRef.current) {
         resetForm();
@@ -120,6 +150,20 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
     }
   };
 
+  const onTogglePlatform = (platformId: PlatformId) => {
+    if (loading || !availablePlatformIds.includes(platformId)) {
+      return;
+    }
+    platformSelectionTouchedRef.current = true;
+    setSelectedPlatformIds((current) =>
+      normalizePlatformIds(
+        current.includes(platformId)
+          ? current.filter((item) => item !== platformId)
+          : [...current, platformId]
+      )
+    );
+  };
+
   return (
     <section className="page-shell generate-page glass-panel">
       <div className="generate-page__hero">
@@ -133,18 +177,22 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
             Siapkan satu video master untuk semua channel affiliate Anda.
           </h2>
           <p className="page-intro">
-            Upload video, kirim konteks promosi, lalu sistem akan memproses TikTok, YouTube
-            Shorts, Facebook, dan Shopee dalam satu alur kerja.
+            Upload video, pilih platform yang dibutuhkan, lalu sistem hanya akan memproses
+            channel yang Anda aktifkan.
           </p>
         </div>
         <div className="hero-badge-grid">
           <div className="hero-badge-card">
             <span className="hero-badge-card__label">Pipeline</span>
-            <strong>4 Platform</strong>
+            <strong>
+              {selectedPlatformIds.length > 0
+                ? `${selectedPlatformIds.length} Platform`
+                : "Pilih Platform"}
+            </strong>
           </div>
           <div className="hero-badge-card">
             <span className="hero-badge-card__label">Status</span>
-            <strong>Ready to render</strong>
+            <strong>{selectedPlatformIds.length > 0 ? "Ready to render" : "Butuh pilihan"}</strong>
           </div>
         </div>
         <div className="hero-pills">
@@ -229,9 +277,16 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
             />
           </label>
 
+          <PlatformSelector
+            selectedPlatformIds={selectedPlatformIds}
+            availablePlatformIds={availablePlatformIds}
+            disabled={loading}
+            onTogglePlatform={onTogglePlatform}
+          />
+
           <button type="submit" className="primary-button" disabled={loading}>
             <i className="ti ti-bolt" aria-hidden="true" />
-            <span>{loading ? "Memproses..." : "Generate All Platforms"}</span>
+            <span>{loading ? "Memproses..." : "Generate Platform Terpilih"}</span>
           </button>
         </form>
 

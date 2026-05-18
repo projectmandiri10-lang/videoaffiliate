@@ -778,6 +778,57 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.platform-selector {
+  display: grid;
+  gap: 12px;
+}
+
+.platform-selector__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.platform-selector__grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.platform-toggle-chip {
+  min-height: 88px;
+  padding: 14px 16px;
+  border-radius: 22px;
+  text-align: left;
+  display: grid;
+  gap: 8px;
+  align-content: space-between;
+  background:
+    linear-gradient(135deg, rgba(15, 255, 255, 0.08), rgba(223, 0, 255, 0.03)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.platform-toggle-chip.is-selected {
+  border-color: rgba(15, 255, 255, 0.42);
+  box-shadow: 0 0 0 4px rgba(15, 255, 255, 0.06);
+}
+
+.platform-toggle-chip.is-unavailable {
+  opacity: 0.55;
+}
+
+.platform-toggle-chip__label {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.platform-toggle-chip__meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .output-links a {
   display: inline-flex;
   align-items: center;

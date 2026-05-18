@@ -16,7 +16,7 @@ import {
   GEMINI_EXCITED_PRESETS,
   GEMINI_TTS_VOICES,
   MAX_UPLOAD_BYTES,
-  PLATFORM_ORDER,
+  PLATFORM_LABELS,
   findTtsVoiceByName
 } from "./constants.js";
 import { getRenderProfileIdForPlatform, pickRenderVariantKey } from "./render-config.js";
@@ -27,6 +27,7 @@ import {
   parseJobUpdateInput,
   parsePlatformMetadataInput,
   parseRetryPlatformId,
+  parseSelectedPlatformIds,
   parseSettings,
   parseTtsPreviewInput
 } from "./validation.js";
@@ -868,6 +869,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     let title = "";
     let description = "";
     let affiliateLink = "";
+    let rawPlatformIds: unknown;
     let videoPath = "";
     let videoMimeType = "video/mp4";
     let uploadDir = "";
@@ -908,6 +910,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         if (part.type === "field" && part.fieldname === "affiliateLink") {
           affiliateLink = String(part.value || "").trim();
         }
+        if (part.type === "field" && part.fieldname === "platformIds") {
+          rawPlatformIds = part.value;
+        }
         if (part.type === "file") {
           part.file.resume();
         }
@@ -923,6 +928,36 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       }
 
       const settings = await options.settingsStore.get();
+      const enabledPlatformIds = settings.platforms
+        .filter((platform) => platform.enabled)
+        .map((platform) => platform.platformId);
+      let selectedPlatformIds: PlatformId[];
+      try {
+        selectedPlatformIds =
+          rawPlatformIds == null
+            ? enabledPlatformIds
+            : parseSelectedPlatformIds(rawPlatformIds);
+      } catch (error) {
+        return sendNormalizedError(reply, error, "Pilihan platform tidak valid.");
+      }
+
+      if (!selectedPlatformIds.length) {
+        return reply.code(400).send({
+          message: "Tidak ada platform aktif untuk dirender. Aktifkan atau pilih minimal satu platform."
+        });
+      }
+
+      const disabledSelectedPlatformIds = selectedPlatformIds.filter(
+        (platformId) => !enabledPlatformIds.includes(platformId)
+      );
+      if (disabledSelectedPlatformIds.length > 0) {
+        return reply.code(400).send({
+          message: `Platform berikut sedang nonaktif di settings: ${disabledSelectedPlatformIds
+            .map((platformId) => PLATFORM_LABELS[platformId])
+            .join(", ")}.`
+        });
+      }
+
       const durationSec = await durationProbe(videoPath);
       if (durationSec > settings.maxVideoSeconds) {
         return reply.code(400).send({
@@ -942,11 +977,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         videoMimeType,
         videoDurationSec: durationSec,
         overallStatus: "queued",
-        platforms: createPlatformRuns(jobId, PLATFORM_ORDER)
+        platforms: createPlatformRuns(jobId, selectedPlatformIds)
       };
       await options.jobsStore.create(job);
       keepUploadDir = true;
-      options.processor.enqueue(jobId, PLATFORM_ORDER);
+      options.processor.enqueue(jobId, selectedPlatformIds);
 
       return reply.code(202).send({
         jobId,
