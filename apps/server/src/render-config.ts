@@ -56,7 +56,7 @@ export interface RenderProfileDefinition {
   variants: RenderVariantDefinition[];
 }
 
-export const RENDERER_VERSION = "platform-renderer-v4-visual-audit";
+export const RENDERER_VERSION = "platform-renderer-v5-shorts-punch";
 
 export const RENDER_PROFILES: Record<RenderProfileId, RenderProfileDefinition> = {
   native_source: {
@@ -90,23 +90,24 @@ export const RENDER_PROFILES: Record<RenderProfileId, RenderProfileDefinition> =
     label: "YouTube Editorial",
     burnSubtitles: true,
     subtitleTheme: {
-      fontFamily: "Barlow Semi Condensed",
-      fontAsset: "BarlowSemiCondensed-SemiBold.ttf",
-      minFontSize: 28,
-      fontSizeRatio: 0.034,
+      fontFamily: "Archivo",
+      fontAsset: "Archivo-Variable.ttf",
+      minFontSize: 32,
+      fontSizeRatio: 0.038,
       primaryColor: "&H00FFFFFF",
-      outlineColor: "&H00111111",
-      backColor: "&H70101010",
+      outlineColor: "&H00070707",
+      backColor: "&H8A0B0B0B",
       borderStyle: 1,
-      outline: 2.6,
-      shadow: 0.4,
+      outline: 3.4,
+      shadow: 0.8,
       alignment: 2,
-      minMarginV: 58,
-      marginVRatio: 0.075
+      minMarginV: 76,
+      marginVRatio: 0.092,
+      scaleX: 93
     },
     textTheme: {
-      fontFamily: "Barlow Semi Condensed",
-      fontAsset: "BarlowSemiCondensed-SemiBold.ttf",
+      fontFamily: "Archivo",
+      fontAsset: "Archivo-Variable.ttf",
       fontColor: "white"
     },
     introDurationSec: 0.6,
@@ -127,21 +128,21 @@ export const RENDER_PROFILES: Record<RenderProfileId, RenderProfileDefinition> =
         cropZoom: 1.03,
         anchorX: 0.5,
         anchorY: 0.48,
-        subtitleMarginVRatio: 0.075
+        subtitleMarginVRatio: 0.092
       },
       {
         key: "editorial_right",
         cropZoom: 1.04,
         anchorX: 0.62,
         anchorY: 0.44,
-        subtitleMarginVRatio: 0.08
+        subtitleMarginVRatio: 0.098
       },
       {
         key: "editorial_left",
         cropZoom: 1.035,
         anchorX: 0.38,
         anchorY: 0.46,
-        subtitleMarginVRatio: 0.075
+        subtitleMarginVRatio: 0.092
       }
     ]
   },

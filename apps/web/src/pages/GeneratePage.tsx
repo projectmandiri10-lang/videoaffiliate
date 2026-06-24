@@ -1,9 +1,6 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
-import { createJob, fetchSettings } from "../api";
-import { PlatformSelector } from "../components/PlatformSelector";
+import { useState, type DragEvent, type FormEvent } from "react";
+import { createJob } from "../api";
 import type { JobCreationTransition } from "../job-creation";
-import { getEnabledPlatformIds, PLATFORM_ORDER, normalizePlatformIds } from "../platforms";
-import type { PlatformId } from "../types";
 
 interface GeneratePageProps {
   onSubmissionStateChange?: (transition: JobCreationTransition) => void;
@@ -14,41 +11,11 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [affiliateLink, setAffiliateLink] = useState("");
-  const [availablePlatformIds, setAvailablePlatformIds] = useState<PlatformId[]>(PLATFORM_ORDER);
-  const [selectedPlatformIds, setSelectedPlatformIds] = useState<PlatformId[]>(PLATFORM_ORDER);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-  const mountedRef = useRef(true);
-  const platformSelectionTouchedRef = useRef(false);
-
-  useEffect(() => {
-    mountedRef.current = true;
-
-    const loadPlatformDefaults = async () => {
-      try {
-        const settings = await fetchSettings();
-        if (!mountedRef.current) {
-          return;
-        }
-        const enabledPlatformIds = getEnabledPlatformIds(settings);
-        setAvailablePlatformIds(enabledPlatformIds);
-        if (!platformSelectionTouchedRef.current) {
-          setSelectedPlatformIds(enabledPlatformIds);
-        }
-      } catch {
-        // Keep frontend usable with default platform list when settings cannot be loaded.
-      }
-    };
-
-    void loadPlatformDefaults();
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   const resetForm = () => {
     setVideo(null);
@@ -65,10 +32,6 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
 
     if (!video || !title.trim() || !description.trim() || !affiliateLink.trim()) {
       setError("Video, judul, deskripsi, dan affiliate link wajib diisi.");
-      return;
-    }
-    if (!selectedPlatformIds.length) {
-      setError("Pilih minimal satu platform tujuan.");
       return;
     }
 
@@ -89,40 +52,28 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
         video,
         title: trimmedTitle,
         description: trimmedDescription,
-        affiliateLink: trimmedAffiliateLink,
-        platformIds: selectedPlatformIds
+        affiliateLink: trimmedAffiliateLink
       });
-      if (mountedRef.current) {
-        resetForm();
-      }
-      if (onSubmissionStateChange) {
-        onSubmissionStateChange({
-          requestId,
-          title: trimmedTitle,
-          phase: "created",
-          jobId: result.jobId,
-          status: result.status
-        });
-      } else if (mountedRef.current) {
-        setMessage(`Job ${result.jobId} dibuat dengan status ${result.status}.`);
-      }
+      resetForm();
+      onSubmissionStateChange?.({
+        requestId,
+        title: trimmedTitle,
+        phase: "created",
+        jobId: result.jobId,
+        status: result.status
+      });
+      setMessage(`Job ${result.jobId} masuk antrean analisis.`);
     } catch (submitError) {
       const nextError = (submitError as Error).message;
-      if (onSubmissionStateChange) {
-        onSubmissionStateChange({
-          requestId,
-          title: trimmedTitle,
-          phase: "failed",
-          error: nextError
-        });
-      }
-      if (mountedRef.current) {
-        setError(nextError);
-      }
+      onSubmissionStateChange?.({
+        requestId,
+        title: trimmedTitle,
+        phase: "failed",
+        error: nextError
+      });
+      setError(nextError);
     } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   };
 
@@ -150,59 +101,42 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
     }
   };
 
-  const onTogglePlatform = (platformId: PlatformId) => {
-    if (loading || !availablePlatformIds.includes(platformId)) {
-      return;
-    }
-    platformSelectionTouchedRef.current = true;
-    setSelectedPlatformIds((current) =>
-      normalizePlatformIds(
-        current.includes(platformId)
-          ? current.filter((item) => item !== platformId)
-          : [...current, platformId]
-      )
-    );
-  };
-
   return (
     <section className="page-shell generate-page glass-panel">
       <div className="generate-page__hero">
         <div className="page-kicker">
-          <i className="ti ti-cpu-2" />
-          <span>Generate</span>
+          <i className="ti ti-scissors" />
+          <span>Analyze</span>
         </div>
         <div className="generate-page__hero-copy">
-          <p className="eyebrow">Neural Launchpad</p>
-          <h2>
-            Siapkan satu video master untuk semua channel affiliate Anda.
-          </h2>
+          <p className="eyebrow">YouTube Shorts Clippers</p>
+          <h2>Upload satu video produk maksimal 30 detik, lalu browser pilih 3 momen terbaik.</h2>
           <p className="page-intro">
-            Upload video, pilih platform yang dibutuhkan, lalu sistem hanya akan memproses
-            channel yang Anda aktifkan.
+            Workflow ini khusus untuk YouTube Shorts affiliate: source maksimal 30 detik, Gemini menganalisa 6 frame penting, lalu voice over dan CTA dibuat lebih tajam untuk hook dan klik link.
           </p>
         </div>
         <div className="hero-badge-grid">
           <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Pipeline</span>
-            <strong>
-              {selectedPlatformIds.length > 0
-                ? `${selectedPlatformIds.length} Platform`
-                : "Pilih Platform"}
-            </strong>
+            <span className="hero-badge-card__label">Output</span>
+            <strong>3 kandidat clip</strong>
           </div>
           <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Status</span>
-            <strong>{selectedPlatformIds.length > 0 ? "Ready to render" : "Butuh pilihan"}</strong>
+            <span className="hero-badge-card__label">Durasi</span>
+            <strong>18-30 detik</strong>
+          </div>
+          <div className="hero-badge-card">
+            <span className="hero-badge-card__label">Gemini</span>
+            <strong>6 frame analisis</strong>
           </div>
         </div>
         <div className="hero-pills">
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--cyan" />
-            Upload aman
+            Audio source dimute
           </div>
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--violet" />
-            Output tetap tersimpan
+            Tab harus tetap terbuka
           </div>
         </div>
       </div>
@@ -217,7 +151,7 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
             onDragLeave={onDragLeave}
             onDrop={onDrop}
           >
-            <span className="field-kicker">Video</span>
+            <span className="field-kicker">Video Produk</span>
             <input
               key={fileInputKey}
               id="video-input"
@@ -233,36 +167,36 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
                 <i className="ti ti-movie" />
               </span>
               <span className="upload-field__copy">
-                <strong>{video ? video.name : "Drag & drop video Anda di sini"}</strong>
+                <strong>{video ? video.name : "Drag & drop video produk Anda di sini"}</strong>
                 <span>
                   {video
-                    ? "File siap diproses. Klik area ini untuk mengganti file."
-                    : "Klik untuk memilih file lokal atau jatuhkan MP4/MOV di area ini."}
+                    ? "File siap dianalisis. Klik area ini untuk mengganti file."
+                    : "Upload MP4/MOV lokal maksimal 30 detik. Video tetap diproses di perangkat Anda."}
                 </span>
               </span>
             </span>
           </label>
 
           <label className="form-field">
-            <span className="field-kicker">Judul</span>
+            <span className="field-kicker">Judul Produk</span>
             <input
               aria-label="Judul"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               disabled={loading}
-              placeholder="Contoh: Promo skincare harian"
+              placeholder="Contoh: Blender portable mini"
             />
           </label>
 
           <label className="form-field">
-            <span className="field-kicker">Deskripsi</span>
+            <span className="field-kicker">Deskripsi Produk</span>
             <textarea
               aria-label="Deskripsi"
               rows={5}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               disabled={loading}
-              placeholder="Jelaskan konten video agar AI bisa membentuk script dan caption."
+              placeholder="Jelaskan fitur, manfaat, dan konteks isi video agar AI lebih akurat."
             />
           </label>
 
@@ -277,16 +211,9 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
             />
           </label>
 
-          <PlatformSelector
-            selectedPlatformIds={selectedPlatformIds}
-            availablePlatformIds={availablePlatformIds}
-            disabled={loading}
-            onTogglePlatform={onTogglePlatform}
-          />
-
           <button type="submit" className="primary-button" disabled={loading}>
             <i className="ti ti-bolt" aria-hidden="true" />
-            <span>{loading ? "Memproses..." : "Generate Platform Terpilih"}</span>
+            <span>{loading ? "Menganalisis..." : "Analisis Video & Buat Kandidat Clip"}</span>
           </button>
         </form>
 

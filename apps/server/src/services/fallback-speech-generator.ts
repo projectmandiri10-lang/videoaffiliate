@@ -21,7 +21,7 @@ export class FallbackSpeechGenerator implements SpeechGenerator {
     } catch (error) {
       this.logger.warn(
         { err: error, model: input.model, voiceName: input.voiceName },
-        "LiteLLM TTS gagal, fallback ke Windows local TTS."
+        "Gemini TTS gagal, fallback ke Windows local TTS."
       );
       try {
         return await this.fallback.generateSpeech(input);

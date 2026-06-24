@@ -22,8 +22,9 @@ export class SettingsStore {
   }
 
   public async set(next: AppSettings): Promise<AppSettings> {
-    await this.file.set(next);
-    return next;
+    const normalized = parseSettings(next);
+    await this.file.set(normalized);
+    return normalized;
   }
 
   public async pickCta(platformId: PlatformId): Promise<{

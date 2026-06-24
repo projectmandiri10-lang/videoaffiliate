@@ -5,6 +5,10 @@ import {
   PLATFORM_LABELS,
   createDefaultCtaSequence
 } from "./platform-config.js";
+import {
+  DEFAULT_GEMINI_SCRIPT_MODEL,
+  DEFAULT_GEMINI_TTS_MODEL
+} from "./utils/gemini-models.js";
 
 export const MAX_HISTORY = 20;
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
@@ -13,8 +17,8 @@ export const DEFAULT_PORT = 8787;
 export { PLATFORM_CONFIG, PLATFORM_LABELS, PLATFORM_ORDER } from "./platform-config.js";
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  scriptModel: "gemini/gemini-2.5-flash-image",
-  ttsModel: "vertex_ai/gemini-2.5-flash-tts",
+  scriptModel: DEFAULT_GEMINI_SCRIPT_MODEL,
+  ttsModel: DEFAULT_GEMINI_TTS_MODEL,
   language: "id-ID",
   maxVideoSeconds: 60,
   safetyMode: "safe_marketing",
@@ -24,7 +28,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   concurrency: 1,
   platforms: PLATFORM_ORDER.map((platformId) => ({
     platformId,
-    enabled: true,
+    enabled: platformId === "youtube",
     voiceName: PLATFORM_CONFIG[platformId].defaultVoiceName,
     speechRate: PLATFORM_CONFIG[platformId].defaultSpeechRate
   }))

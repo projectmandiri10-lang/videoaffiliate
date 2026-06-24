@@ -1,38 +1,49 @@
 import pino from "pino";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  LiteLlmTtsService,
-  normalizeLiteLlmTtsModel
+  GeminiTtsService,
+  normalizeGeminiTtsModel
 } from "../src/services/litellm-tts-service.js";
 
-describe("LiteLlmTtsService", () => {
+describe("GeminiTtsService", () => {
   const logger = pino({ level: "silent" });
-  const createSpeech = vi.fn();
-  const service = new LiteLlmTtsService("http://localhost:4000/v1", "litellm-secret", logger, {
-    audio: {
-      speech: {
-        create: createSpeech
-      }
+  const generateContent = vi.fn();
+  const service = new GeminiTtsService("gemini-secret", logger, {
+    models: {
+      generateContent
     }
   });
 
   beforeEach(() => {
-    createSpeech.mockReset();
+    generateContent.mockReset();
   });
 
-  it("maps legacy Gemini TTS model names to LiteLLM aliases", () => {
-    expect(normalizeLiteLlmTtsModel("gemini-2.5-flash-preview-tts")).toBe(
-      "vertex_ai/gemini-2.5-flash-tts"
+  it("maps legacy Gemini TTS model names to direct Gemini model IDs", () => {
+    expect(normalizeGeminiTtsModel("vertex_ai/gemini-2.5-flash-tts")).toBe(
+      "gemini-2.5-flash-preview-tts"
     );
-    expect(normalizeLiteLlmTtsModel("gemini-2.5-pro-preview-tts")).toBe(
-      "vertex_ai/gemini-2.5-pro-tts"
+    expect(normalizeGeminiTtsModel("gemini-2.5-pro-preview-tts")).toBe(
+      "gemini-2.5-pro-preview-tts"
     );
   });
 
-  it("requests LiteLLM TTS audio with the configured model and voice", async () => {
-    const audioBytes = Uint8Array.from(Buffer.from("litellm-audio"));
-    createSpeech.mockResolvedValue({
-      arrayBuffer: async () => audioBytes.buffer.slice(0)
+  it("requests Gemini TTS audio with the configured model and voice", async () => {
+    const audioBytes = Uint8Array.from(Buffer.from("gemini-audio"));
+    generateContent.mockResolvedValue({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                inlineData: {
+                  data: Buffer.from(audioBytes).toString("base64"),
+                  mimeType: "audio/L16"
+                }
+              }
+            ]
+          }
+        }
+      ]
     });
 
     const audio = await service.generateSpeech({
@@ -42,19 +53,22 @@ describe("LiteLlmTtsService", () => {
       speechRate: 1
     });
 
-    expect(audio.data.toString("utf8")).toBe("litellm-audio");
-    expect(audio.mimeType).toBe("audio/wav");
-    expect(createSpeech).toHaveBeenCalledTimes(1);
-    expect(createSpeech).toHaveBeenCalledWith({
-      model: "vertex_ai/gemini-2.5-flash-tts",
-      voice: "Kore",
-      input: "Halo, ini voice over.",
-      response_format: "wav",
-      speed: 1,
-      instructions: expect.stringContaining("Language: Bahasa Indonesia (id-ID).")
+    expect(audio.data.toString("utf8")).toBe("gemini-audio");
+    expect(audio.mimeType).toBe("audio/pcm");
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(generateContent).toHaveBeenCalledWith({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: "Halo, ini voice over.",
+      config: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: "Kore"
+            }
+          }
+        }
+      }
     });
-    expect(createSpeech.mock.calls[0]?.[0]?.instructions).toContain(
-      "Accent: penutur asli Indonesia"
-    );
   });
 });

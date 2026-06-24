@@ -8,6 +8,8 @@ import type { AnalysisFrame } from "../types.js";
 
 const ANALYSIS_FRAME_RATIOS = [0.15, 0.38, 0.62, 0.85];
 const ANALYSIS_FRAME_MAX_WIDTH = 768;
+const CLIP_PREVIEW_WIDTH = 720;
+const CLIP_ANALYSIS_FRAME_COUNT = 4;
 
 interface FfprobeStream {
   codec_type?: string;
@@ -256,6 +258,15 @@ function buildFrameOutputPath(filePath: string, index: number): string {
   return path.join(path.dirname(filePath), "_analysis", `frame-${String(index + 1).padStart(2, "0")}.jpg`);
 }
 
+function buildScopedFrameOutputPath(filePath: string, scope: string, index: number): string {
+  return path.join(
+    path.dirname(filePath),
+    "_analysis",
+    scope,
+    `frame-${String(index + 1).padStart(2, "0")}.jpg`
+  );
+}
+
 function buildAnalysisTimestamps(durationSec: number): number[] {
   const unique = new Set<number>();
   for (const ratio of ANALYSIS_FRAME_RATIOS) {
@@ -282,4 +293,124 @@ export async function extractAnalysisFrames(
   }
 
   return frames;
+}
+
+function buildClipFrameTimestamps(startSec: number, endSec: number, count = CLIP_ANALYSIS_FRAME_COUNT): number[] {
+  const durationSec = Math.max(0.1, endSec - startSec);
+  const points = new Set<number>();
+  const ratios =
+    count <= ANALYSIS_FRAME_RATIOS.length
+      ? ANALYSIS_FRAME_RATIOS.slice(0, count)
+      : Array.from({ length: count }, (_, index) => (index + 1) / (count + 1));
+
+  for (const ratio of ratios) {
+    const timestampSec = startSec + durationSec * ratio;
+    points.add(Number(Math.min(endSec - 0.05, Math.max(startSec, timestampSec)).toFixed(3)));
+  }
+
+  return [...points];
+}
+
+export async function extractAnalysisFramesForRange(
+  filePath: string,
+  startSec: number,
+  endSec: number,
+  scope = "clip",
+  count = CLIP_ANALYSIS_FRAME_COUNT
+): Promise<AnalysisFrame[]> {
+  const timestamps = buildClipFrameTimestamps(startSec, endSec, count);
+  const frames: AnalysisFrame[] = [];
+
+  for (const [index, timestampSec] of timestamps.entries()) {
+    const outputPath = buildScopedFrameOutputPath(filePath, scope, index);
+    await extractFrameToJpeg(filePath, outputPath, timestampSec);
+    const imageBuffer = await readFile(outputPath);
+    frames.push({
+      dataUrl: `data:image/jpeg;base64,${imageBuffer.toString("base64")}`,
+      timestampSec
+    });
+  }
+
+  return frames;
+}
+
+export async function detectSceneChangeTimestamps(
+  filePath: string,
+  threshold = 0.27
+): Promise<number[]> {
+  return await new Promise<number[]>((resolve, reject) => {
+    const args = [
+      "-hide_banner",
+      "-i",
+      filePath,
+      "-filter:v",
+      `select='gt(scene,${threshold})',showinfo`,
+      "-an",
+      "-f",
+      "null",
+      "-"
+    ];
+    const proc = spawn(FFMPEG_EXEC, args, { windowsHide: true });
+    let stderr = "";
+
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += String(chunk);
+    });
+    proc.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        reject(
+          new Error(
+            `ffmpeg tidak ditemukan (${FFMPEG_EXEC}). Jalankan 'npm rebuild ffmpeg-static' atau set env FFMPEG_PATH ke lokasi ffmpeg.exe.`
+          )
+        );
+        return;
+      }
+      reject(error);
+    });
+    proc.once("close", (code: number | null) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg gagal mendeteksi scene video: ${stderr || code}`));
+        return;
+      }
+
+      const matches = [...stderr.matchAll(/pts_time:([0-9.]+)/g)];
+      const timestamps = matches
+        .map((match) => Number(match[1]))
+        .filter((value) => Number.isFinite(value))
+        .map((value) => Number(value.toFixed(3)));
+      resolve([...new Set(timestamps)]);
+    });
+  });
+}
+
+export async function createVideoPreview(
+  sourcePath: string,
+  outputPath: string,
+  startSec: number,
+  durationSec: number
+): Promise<void> {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await runFfmpeg([
+    "-y",
+    "-ss",
+    startSec.toFixed(3),
+    "-i",
+    sourcePath,
+    "-t",
+    durationSec.toFixed(3),
+    "-an",
+    "-vf",
+    `scale='min(${CLIP_PREVIEW_WIDTH},iw)':-2`,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "24",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    outputPath
+  ]);
 }

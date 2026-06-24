@@ -51,13 +51,14 @@ describe("render video graph", () => {
     expect(graph.burnSubtitles).toBe(true);
     expect(graph.filterComplex).not.toContain("subtitles=");
     expect(graph.filterComplex).toContain("drawtext=fontfile=");
-    expect(graph.filterComplex).toContain("BarlowSemiCondensed-SemiBold.ttf");
+    expect(graph.filterComplex).toContain("Archivo-Variable.ttf");
     expect(graph.filterComplex).toContain("Ini subtitle YouTube");
     expect(graph.filterComplex).toContain("tampil di bawah video");
     expect(graph.filterComplex).toContain("y=h-");
     expect(graph.filterComplex).toContain("enable='between(t,0.200,2.400)'");
     expect(graph.filterComplex).toContain("SHORT REVIEW");
     expect(graph.filterComplex).toContain("drawbox=x=");
+    expect(graph.filterComplex).toContain("boxborderw=");
   });
 
   it("builds Facebook graph with subtitle burn-in and matching text font", () => {

@@ -2,6 +2,10 @@ import { z } from "zod";
 import { isKnownTtsVoiceName, PLATFORM_ORDER } from "./constants.js";
 import type { AppSettings, PlatformId } from "./types.js";
 import { createDefaultCtaSequence } from "./platform-config.js";
+import {
+  normalizeGeminiScriptModel,
+  normalizeGeminiTtsModel
+} from "./utils/gemini-models.js";
 
 const platformIdSchema = z.enum(PLATFORM_ORDER);
 const nonEmptyTextSchema = z.string().trim().min(1);
@@ -96,6 +100,10 @@ const ttsPreviewSchema = z.object({
   text: z.string().trim().min(1).max(220).optional()
 });
 
+const selectClipSchema = z.object({
+  clipId: z.string().trim().min(1)
+});
+
 export function parseSettings(input: unknown): AppSettings {
   const result = settingsSchema.parse(input);
   const sorted = [...result.platforms].sort(
@@ -103,6 +111,8 @@ export function parseSettings(input: unknown): AppSettings {
   );
   return {
     ...result,
+    scriptModel: normalizeGeminiScriptModel(result.scriptModel),
+    ttsModel: normalizeGeminiTtsModel(result.ttsModel),
     platforms: sorted
   };
 }
@@ -162,4 +172,10 @@ export function parseTtsPreviewInput(input: unknown): {
     speechRate: parsed.speechRate ?? 1,
     text: parsed.text
   };
+}
+
+export function parseSelectClipInput(input: unknown): {
+  clipId: string;
+} {
+  return selectClipSchema.parse(input);
 }

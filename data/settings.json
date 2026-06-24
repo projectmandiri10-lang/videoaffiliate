@@ -1,6 +1,6 @@
 {
-  "scriptModel": "gemini/gemini-2.5-flash-image",
-  "ttsModel": "vertex_ai/gemini-2.5-flash-tts",
+  "scriptModel": "gemini-2.5-pro",
+  "ttsModel": "gemini-2.5-flash-preview-tts",
   "language": "id-ID",
   "maxVideoSeconds": 60,
   "safetyMode": "safe_marketing",
@@ -16,27 +16,27 @@
   "platforms": [
     {
       "platformId": "tiktok",
-      "enabled": true,
+      "enabled": false,
       "voiceName": "Leda",
-      "speechRate": 1.1
+      "speechRate": 1
     },
     {
       "platformId": "youtube",
       "enabled": true,
-      "voiceName": "Leda",
-      "speechRate": 1.1
+      "voiceName": "Charon",
+      "speechRate": 1
     },
     {
       "platformId": "facebook",
-      "enabled": true,
-      "voiceName": "Leda",
-      "speechRate": 1.1
+      "enabled": false,
+      "voiceName": "Aoede",
+      "speechRate": 1
     },
     {
       "platformId": "shopee",
-      "enabled": true,
-      "voiceName": "Leda",
-      "speechRate": 1.1
+      "enabled": false,
+      "voiceName": "Kore",
+      "speechRate": 1
     }
   ]
 }

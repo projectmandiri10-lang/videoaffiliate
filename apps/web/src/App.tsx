@@ -3,13 +3,15 @@ import type { JobCreationTransition } from "./job-creation";
 import { GeneratePage } from "./pages/GeneratePage";
 import { JobsPage } from "./pages/JobsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TutorialPage } from "./pages/TutorialPage";
 
-type TabId = "generate" | "jobs" | "settings";
+type TabId = "generate" | "jobs" | "settings" | "tutorial";
 
 const TAB_LABEL: Record<TabId, string> = {
-  generate: "Generate",
+  generate: "Analyze",
   jobs: "Jobs",
-  settings: "Settings"
+  settings: "Settings",
+  tutorial: "Tutorial"
 };
 
 export default function App() {
@@ -41,11 +43,10 @@ export default function App() {
               <i className="ti ti-atom-2" />
             </div>
             <div>
-              <p className="eyebrow">Automation Suite</p>
-              <h1>voice over video generator</h1>
+              <p className="eyebrow">Clippers Workflow</p>
+              <h1>PENGISI SUARA VIDEOSHORT YOUTUBE</h1>
               <p className="app-brand__copy">
-                Pipeline video affiliate multi-platform dengan AI narration dan output yang tetap
-                bisa diakses.
+                Upload video produk maksimal 30 detik, analisis 6 frame penting langsung di browser, lalu render Shorts final dengan voice over affiliate Gemini yang lebih hook-first.
               </p>
             </div>
           </div>
@@ -54,7 +55,13 @@ export default function App() {
             {(Object.keys(TAB_LABEL) as TabId[]).map((tabId) => (
               <button
                 key={tabId}
-                className={tab === tabId ? "tab active" : "tab"}
+                className={[
+                  "tab",
+                  tab === tabId ? "active" : "",
+                  tabId === "tutorial" ? "tab--tutorial" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 onClick={() => setTab(tabId)}
               >
                 <span className="tab__label">{TAB_LABEL[tabId]}</span>
@@ -74,18 +81,19 @@ export default function App() {
             />
           )}
           {tab === "settings" && <SettingsPage />}
+          {tab === "tutorial" && <TutorialPage />}
         </section>
 
         <footer className="app-footer">
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--cyan" />
-            Outputs aman
+            3 kandidat clip
           </div>
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--violet" />
-            Jobs real-time
+            Browser-local render
           </div>
-          <div className="footer-pill">Build UI neon responsive</div>
+          <div className="footer-pill">Cloudflare proxy + OPFS</div>
         </footer>
       </div>
     </main>

@@ -1,13 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { fetchSettings, fetchTtsVoices, updateSettings } from "../api";
 import type { AppSettings, PlatformSettings, TtsVoiceOption } from "../types";
 
-const PLATFORM_TITLE: Record<PlatformSettings["platformId"], string> = {
-  tiktok: "TikTok",
-  youtube: "YouTube Shorts",
-  facebook: "Facebook",
-  shopee: "Shopee"
-};
+function getYoutubePlatform(settings: AppSettings): PlatformSettings {
+  return settings.platforms.find((platform) => platform.platformId === "youtube") ?? settings.platforms[0]!;
+}
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -16,37 +13,25 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [voiceCatalogError, setVoiceCatalogError] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
     const load = async () => {
       try {
-        const loadedSettings = await fetchSettings();
+        const [loadedSettings, voiceData] = await Promise.all([
+          fetchSettings(),
+          fetchTtsVoices()
+        ]);
         if (!mounted) {
           return;
         }
         setSettings(loadedSettings);
+        setVoiceOptions(Array.isArray(voiceData.voices) ? voiceData.voices : []);
         setError("");
       } catch (loadError) {
         if (mounted) {
           setError((loadError as Error).message);
-          setLoading(false);
-        }
-        return;
-      }
-
-      try {
-        const voiceData = await fetchTtsVoices();
-        if (!mounted) {
-          return;
-        }
-        setVoiceOptions(Array.isArray(voiceData.voices) ? voiceData.voices : []);
-        setVoiceCatalogError("");
-      } catch (loadError) {
-        if (mounted) {
-          setVoiceCatalogError((loadError as Error).message);
         }
       } finally {
         if (mounted) {
@@ -62,23 +47,11 @@ export function SettingsPage() {
     };
   }, []);
 
-  const onPlatformChange = <K extends keyof PlatformSettings>(
-    platformId: PlatformSettings["platformId"],
-    key: K,
-    value: PlatformSettings[K]
-  ) => {
-    if (!settings) {
-      return;
-    }
-    const platforms = settings.platforms.map((platform) =>
-      platform.platformId === platformId ? { ...platform, [key]: value } : platform
-    );
-    setSettings({ ...settings, platforms });
-  };
+  const youtubePlatform = useMemo(() => (settings ? getYoutubePlatform(settings) : null), [settings]);
 
   const onSave = async (event: FormEvent) => {
     event.preventDefault();
-    if (!settings) {
+    if (!settings || !youtubePlatform) {
       return;
     }
     setSaving(true);
@@ -95,7 +68,19 @@ export function SettingsPage() {
     }
   };
 
-  if (loading || !settings) {
+  const updateYoutubePlatform = (patch: Partial<PlatformSettings>) => {
+    if (!settings || !youtubePlatform) {
+      return;
+    }
+    setSettings({
+      ...settings,
+      platforms: settings.platforms.map((platform) =>
+        platform.platformId === "youtube" ? { ...platform, ...patch } : platform
+      )
+    });
+  };
+
+  if (loading || !settings || !youtubePlatform) {
     return (
       <section className="card">
         <h2>Settings</h2>
@@ -113,21 +98,10 @@ export function SettingsPage() {
             <i className="ti ti-settings-spark" />
             <span>Settings</span>
           </div>
-          <p className="eyebrow">Configuration Matrix</p>
-          <h2>Settings</h2>
+          <p className="eyebrow">YouTube Shorts Core</p>
+          <h2>Kontrol model analisis dan voice over Gemini</h2>
           <p className="page-intro">
-            Tone, hook, dan subtitle style dikunci oleh sistem. Isi `Script Model` dan `TTS
-            Model` untuk route LiteLLM: script/caption memakai model text atau vision, voice-over
-            memakai model Gemini TTS yang tersedia di proxy.
-          </p>
-          <p className="section-note">
-            Jika model utama untuk script/caption gagal, server akan fallback otomatis ke model
-            LiteLLM lain. Jika LiteLLM TTS gagal, server hanya akan fallback ke voice Windows lokal
-            bila ada voice Indonesia; kalau tidak ada, job akan gagal dengan pesan yang jelas.
-          </p>
-          <p className="section-note">
-            Visual TikTok tetap memakai source asli. YouTube, Facebook, dan Shopee otomatis
-            dirender ulang oleh backend memakai preset visual platform-native yang dikunci sistem.
+            Settings disimpan lokal per browser. Workflow ini dikunci untuk YouTube Shorts affiliate maksimal 30 detik dengan analisis 6 frame dan voice over yang lebih hook-first.
           </p>
         </div>
         <button type="submit" form="settings-form" className="primary-button" disabled={saving}>
@@ -140,7 +114,7 @@ export function SettingsPage() {
         <section className="settings-core glass-panel">
           <div className="section-title">
             <i className="ti ti-binary" />
-            <h3>System Core</h3>
+            <h3>Model & Batasan</h3>
           </div>
 
           <div className="settings-core__grid">
@@ -152,9 +126,7 @@ export function SettingsPage() {
                   setSettings({ ...settings, scriptModel: event.target.value })
                 }
               />
-              <span className="small">
-                Contoh LiteLLM vision: gemini/gemini-2.5-flash-image.
-              </span>
+              <span className="small">Default analisis dan scoring: `gemini-2.5-pro`.</span>
             </label>
 
             <label className="form-field">
@@ -164,7 +136,7 @@ export function SettingsPage() {
                 onChange={(event) => setSettings({ ...settings, ttsModel: event.target.value })}
               />
               <span className="small">
-                Dipakai oleh LiteLLM untuk route ke Gemini TTS, contoh: vertex_ai/gemini-2.5-flash-tts.
+                Default voice over: `gemini-2.5-flash-preview-tts`.
               </span>
             </label>
 
@@ -172,112 +144,53 @@ export function SettingsPage() {
               <span className="field-kicker">Max Video Seconds</span>
               <input
                 type="number"
-                min={10}
-                max={180}
+                min={18}
+                max={30}
                 value={settings.maxVideoSeconds}
                 onChange={(event) =>
                   setSettings({ ...settings, maxVideoSeconds: Number(event.target.value) })
                 }
               />
-            </label>
-
-            <label className="form-field">
-              <span className="field-kicker">CTA Mode</span>
-              <select
-                value={settings.ctaMode}
-                onChange={(event) =>
-                  setSettings({
-                    ...settings,
-                    ctaMode: event.target.value as AppSettings["ctaMode"]
-                  })
-                }
-              >
-                <option value="random">Random</option>
-                <option value="sequential">Berurutan</option>
-              </select>
+              <span className="small">Disarankan tetap `30 detik` agar render browser dan hook Shorts lebih optimal.</span>
             </label>
           </div>
         </section>
 
-        <section className="settings-platforms">
-          <div className="section-title section-title--spaced">
-            <i className="ti ti-share" />
-            <h3>Platform Hub</h3>
+        <section className="settings-core glass-panel">
+          <div className="section-title">
+            <i className="ti ti-microphone-2" />
+            <h3>Voice YouTube Shorts</h3>
           </div>
 
-          <div className="style-grid">
-            {settings.platforms.map((platform) => (
-              <article
-                className={`platform-settings-card glass-panel ${
-                  platform.enabled ? "is-enabled" : "is-disabled"
-                }`}
-                key={platform.platformId}
+          <div className="settings-core__grid">
+            <label className="form-field">
+              <span className="field-kicker">Voice Name</span>
+              <select
+                value={youtubePlatform.voiceName}
+                disabled={!voiceOptions.length}
+                onChange={(event) => updateYoutubePlatform({ voiceName: event.target.value })}
               >
-                <div className="platform-settings-card__head">
-                  <div>
-                    <h3>{PLATFORM_TITLE[platform.platformId]}</h3>
-                    <span className={platform.enabled ? "status status-success" : "status status-queued"}>
-                      {platform.enabled ? "active" : "disabled"}
-                    </span>
-                  </div>
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={platform.enabled}
-                      onChange={(event) =>
-                        onPlatformChange(platform.platformId, "enabled", event.target.checked)
-                      }
-                    />
-                    Aktif
-                  </label>
-                </div>
+                {voiceOptions.map((voice) => (
+                  <option key={voice.voiceName} value={voice.voiceName}>
+                    {voice.label} - {voice.tone} ({voice.gender})
+                  </option>
+                ))}
+              </select>
+            </label>
 
-                <label className="form-field">
-                  <span className="field-kicker">Voice Name</span>
-                  <select
-                    value={platform.voiceName}
-                    disabled={!voiceOptions.length}
-                    onChange={(event) =>
-                      onPlatformChange(platform.platformId, "voiceName", event.target.value)
-                    }
-                  >
-                    {!voiceOptions.some((voice) => voice.voiceName === platform.voiceName) && (
-                      <option value={platform.voiceName}>
-                        {platform.voiceName} (tidak ada di katalog)
-                      </option>
-                    )}
-                    {voiceOptions.map((voice) => (
-                      <option key={voice.voiceName} value={voice.voiceName}>
-                        {voice.label} - {voice.tone} ({voice.gender})
-                      </option>
-                    ))}
-                  </select>
-                  {voiceCatalogError && (
-                    <span className="small err-inline">
-                      Gagal memuat katalog voice: {voiceCatalogError}
-                    </span>
-                  )}
-                </label>
-
-                <label className="form-field">
-                  <span className="field-kicker">Speech Rate</span>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min={0.7}
-                    max={1.3}
-                    value={platform.speechRate}
-                    onChange={(event) =>
-                      onPlatformChange(
-                        platform.platformId,
-                        "speechRate",
-                        Number(event.target.value)
-                      )
-                    }
-                  />
-                </label>
-              </article>
-            ))}
+            <label className="form-field">
+              <span className="field-kicker">Speech Rate</span>
+              <input
+                type="number"
+                step="0.05"
+                min={0.7}
+                max={1.3}
+                value={youtubePlatform.speechRate}
+                onChange={(event) =>
+                  updateYoutubePlatform({ speechRate: Number(event.target.value) })
+                }
+              />
+            </label>
           </div>
         </section>
       </form>

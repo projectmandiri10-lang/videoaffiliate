@@ -29,6 +29,8 @@ export interface RenderVideoInput extends BuildRenderGraphInput {
   sourceVideoPath: string;
   voiceWavPath: string;
   outputVideoPath: string;
+  clipStartSec?: number;
+  clipDurationSec?: number;
 }
 
 export interface RenderGraphPlan {
@@ -676,6 +678,8 @@ export async function renderPlatformVideo(input: RenderVideoInput): Promise<Rend
 
   await runFfmpeg([
     "-y",
+    ...(typeof input.clipStartSec === "number" ? ["-ss", input.clipStartSec.toFixed(3)] : []),
+    ...(typeof input.clipDurationSec === "number" ? ["-t", input.clipDurationSec.toFixed(3)] : []),
     "-i",
     input.sourceVideoPath,
     "-i",

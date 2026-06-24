@@ -24,6 +24,10 @@ export type JobOverallStatus =
   | "failed"
   | "interrupted";
 
+export type AnalysisStatus = "pending" | "running" | "done" | "failed";
+
+export type FinalRenderStatus = "idle" | "pending" | "running" | "done" | "failed";
+
 export interface PlatformSettings {
   platformId: PlatformId;
   enabled: boolean;
@@ -74,6 +78,29 @@ export interface PlatformRun {
   updatedAt: string;
 }
 
+export interface ClipCandidate {
+  clipId: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  score: number;
+  reason: string;
+  previewPath?: string;
+  frameTimestamps: number[];
+}
+
+export interface FinalRenderRecord {
+  status: FinalRenderStatus;
+  errorMessage?: string;
+  scriptText?: string;
+  captionText?: string;
+  hashtags?: string[];
+  srtPath?: string;
+  mp4Path?: string;
+  captionPath?: string;
+  updatedAt: string;
+}
+
 export interface JobRecord {
   jobId: string;
   createdAt: string;
@@ -85,6 +112,12 @@ export interface JobRecord {
   videoMimeType: string;
   videoDurationSec: number;
   overallStatus: JobOverallStatus;
+  workflow?: "youtube_shorts";
+  analysisStatus?: AnalysisStatus;
+  analysisErrorMessage?: string;
+  clipCandidates?: ClipCandidate[];
+  selectedClipId?: string;
+  finalRender?: FinalRenderRecord;
   platforms: PlatformRun[];
 }
 
@@ -104,6 +137,23 @@ export interface GenerateSpeechInput {
   text: string;
   voiceName: string;
   speechRate: number;
+}
+
+export interface ClipCandidateDraft {
+  clipId: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  frameTimestamps: number[];
+  frames: AnalysisFrame[];
+}
+
+export interface AnalyzeClipCandidatesInput {
+  model: string;
+  title: string;
+  description: string;
+  affiliateLink: string;
+  candidates: ClipCandidateDraft[];
 }
 
 export interface TtsVoiceOption {
@@ -138,6 +188,7 @@ export interface GenerateSocialMetadataInput {
 export interface AIService {
   generateScript(input: GenerateScriptInput): Promise<string>;
   generateSocialMetadata(input: GenerateSocialMetadataInput): Promise<SocialMetadata>;
+  analyzeClipCandidates(input: AnalyzeClipCandidatesInput): Promise<ClipCandidate[]>;
 }
 
 export interface SpeechGenerator {

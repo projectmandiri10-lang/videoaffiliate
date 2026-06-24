@@ -4,11 +4,13 @@
   "private": true,
   "workspaces": [
     "apps/server",
-    "apps/web"
+    "apps/web",
+    "packages/*"
   ],
   "scripts": {
     "dev": "concurrently \"npm:dev -w apps/server\" \"npm:dev -w apps/web\"",
     "build": "npm run build -w apps/server && npm run build -w apps/web",
+    "typecheck:functions": "npm exec -w apps/web tsc -- -p ../../functions/tsconfig.json --noEmit",
     "test": "npm run test -w apps/server && npm run test -w apps/web",
     "start": "npm run start -w apps/server"
   },

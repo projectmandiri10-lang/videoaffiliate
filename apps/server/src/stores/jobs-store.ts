@@ -11,6 +11,19 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+export const AUTO_CANCEL_STALE_JOB_REASON = "Dibatalkan otomatis karena ada job yang lebih baru.";
+
+function hasIncompleteAnalysis(job: JobRecord): boolean {
+  return job.analysisStatus === "pending" || job.analysisStatus === "running";
+}
+
+function hasIncompleteRender(job: JobRecord): boolean {
+  return Boolean(
+    job.selectedClipId &&
+      (job.finalRender?.status === "pending" || job.finalRender?.status === "running")
+  );
+}
+
 function listPlatformArtifacts(platforms: PlatformRun[]): string[] {
   const files = new Set<string>();
   for (const platform of platforms) {
@@ -30,6 +43,36 @@ function listPlatformArtifacts(platforms: PlatformRun[]): string[] {
       }
     }
   }
+  return [...files];
+}
+
+function listJobArtifacts(job: JobRecord): string[] {
+  const files = new Set<string>(listPlatformArtifacts(job.platforms));
+
+  for (const previewPath of job.clipCandidates?.map((candidate) => candidate.previewPath) ?? []) {
+    if (!previewPath) {
+      continue;
+    }
+    const absolutePath = outputUrlToAbsolutePath(previewPath);
+    if (absolutePath) {
+      files.add(absolutePath);
+    }
+  }
+
+  for (const artifactPath of [
+    job.finalRender?.mp4Path,
+    job.finalRender?.srtPath,
+    job.finalRender?.captionPath
+  ]) {
+    if (!artifactPath) {
+      continue;
+    }
+    const absolutePath = outputUrlToAbsolutePath(artifactPath);
+    if (absolutePath) {
+      files.add(absolutePath);
+    }
+  }
+
   return [...files];
 }
 
@@ -103,6 +146,8 @@ export class JobsStore {
       const current = normalizeJobRecord(currentRaw);
       updated = updater({
         ...current,
+        clipCandidates: current.clipCandidates?.map((candidate) => ({ ...candidate })) ?? [],
+        finalRender: current.finalRender ? { ...current.finalRender } : undefined,
         platforms: current.platforms.map((platform) => ({
           ...platform,
           artifactPaths: [...platform.artifactPaths]
@@ -162,6 +207,55 @@ export class JobsStore {
         };
       })
     );
+  }
+
+  public async suspendOtherIncompleteJobs(activeJobId: string, reason = AUTO_CANCEL_STALE_JOB_REASON): Promise<number> {
+    let suspendedCount = 0;
+    await this.file.update((jobs) =>
+      jobs.map((rawJob) => {
+        const job = normalizeJobRecord(rawJob);
+        if (job.jobId === activeJobId) {
+          return job;
+        }
+
+        const shouldCancelAnalysis = hasIncompleteAnalysis(job);
+        const shouldCancelRender = hasIncompleteRender(job);
+        if (!shouldCancelAnalysis && !shouldCancelRender) {
+          return job;
+        }
+
+        suspendedCount += 1;
+        const updatedAt = nowIso();
+        return {
+          ...job,
+          updatedAt,
+          overallStatus: "interrupted",
+          analysisStatus: shouldCancelAnalysis ? "failed" : job.analysisStatus,
+          analysisErrorMessage: shouldCancelAnalysis ? reason : job.analysisErrorMessage,
+          finalRender: {
+            ...(job.finalRender ?? {
+              status: "idle",
+              updatedAt
+            }),
+            status: shouldCancelRender ? "failed" : job.finalRender?.status ?? "idle",
+            errorMessage: shouldCancelRender ? reason : job.finalRender?.errorMessage,
+            updatedAt: shouldCancelRender ? updatedAt : job.finalRender?.updatedAt ?? updatedAt
+          },
+          platforms: job.platforms.map((platform) =>
+            platform.status === "pending" || platform.status === "running"
+              ? {
+                  ...platform,
+                  status: "interrupted",
+                  updatedAt,
+                  errorMessage: reason
+                }
+              : platform
+          )
+        };
+      })
+    );
+
+    return suspendedCount;
   }
 
   public async normalizeAll(): Promise<void> {
@@ -261,7 +355,9 @@ export class JobsStore {
   }
 
   private async cleanupJobArtifacts(job: JobRecord): Promise<void> {
-    await cleanupPlatformArtifacts(job.platforms);
+    await Promise.all(
+      listJobArtifacts(job).map((filePath) => rm(filePath, { recursive: false, force: true }))
+    );
     await rm(path.join(UPLOADS_DIR, job.jobId), { recursive: true, force: true });
   }
 }

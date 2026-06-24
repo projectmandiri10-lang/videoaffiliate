@@ -1,26 +1,33 @@
-# Auto Voice Over + Caption (LiteLLM Only)
+# YouTube Shorts Clippers Workflow
 
-Aplikasi untuk otomatisasi:
-- input: `video + judul + deskripsi + affiliate link`
-- output per platform: `.mp4` (video + voice-over) dan `caption + hashtags` siap upload (tersimpan sebagai file `-caption.txt`)
-- style default: `evergreen`, `soft_selling`, `hard_selling`, `problem_solution`
+Versi terbaru project ini memakai arsitektur browser-local untuk Cloudflare free tier:
+- frontend React di Cloudflare Pages
+- proxy Gemini di Cloudflare Pages Functions
+- analisis video, preview clip, dan render final berjalan di browser user dengan `ffmpeg.wasm`
+- job, settings, dan artifact disimpan lokal di browser lewat `IndexedDB + OPFS`
+
+Legacy backend Fastify masih dipertahankan di repo sebagai fallback lokal, tetapi jalur deploy Cloudflare tidak bergantung pada backend itu.
+
+## Workflow Baru
+1. User upload video lokal.
+2. Browser mengekstrak frame dan membuat kandidat clip lokal.
+3. Browser kirim frame ringkas ke `/api/ai/*` Cloudflare Functions untuk scoring, script, caption, dan TTS Gemini.
+4. Browser merender preview dan output final lokal.
+5. User download `.mp4`, `.srt`, dan caption `.txt` langsung dari browser.
+
+Catatan:
+- Tab harus tetap terbuka selama analisis atau render berjalan.
+- Mobile memakai mode terbatas: max `30 detik`, max `80 MB`, render `720p`.
+- Desktop juga dikunci ke max `30 detik` agar hook, CTA, dan render browser tetap cepat untuk YouTube Shorts affiliate.
 
 ## Stack
 - Frontend: React + Vite + TypeScript
-- Backend: Fastify + TypeScript
-- AI: LiteLLM (OpenAI-compatible) untuk script/caption dan route Gemini TTS untuk voice-over, dengan fallback otomatis ke model lain di proxy dan voice Windows lokal saat provider utama gagal
-- Media: `ffmpeg-static` + `ffprobe-static` (tanpa install FFmpeg global)
-- Runtime aplikasi: Node.js (Python tidak dipakai untuk runtime aplikasi ini)
+- Shared core: `packages/core`
+- Browser media engine: `@ffmpeg/ffmpeg` + `@ffmpeg/util`
+- Cloudflare layer: Pages + Pages Functions
+- Legacy backend: Fastify + TypeScript
 
-## Struktur
-- `apps/server`: API + job processor
-- `apps/web`: UI
-- `data/settings.json`: konfigurasi model/prompt/voice
-- `data/jobs.json`: metadata 20 job terakhir
-- `outputs/<platformId>`: file hasil `.mp4` dan `*-caption.txt`
-- `uploads/<jobId>`: video source upload
-
-## Setup
+## Local Setup
 1. Install dependency:
 ```bash
 npm install
@@ -29,103 +36,64 @@ npm install
 ```bash
 copy .env.example .env
 ```
-3. Isi `LITELLM_BASE_URL` dan `LITELLM_SECRET_KEY` di `.env`.
+3. Isi `.env` untuk mode legacy/local:
+```env
+GEMINI_API_KEY=...
+PORT=8787
+WEB_ORIGIN=http://localhost:5173
+```
 
-## Menjalankan (dev)
+## Menjalankan
+
+### Web app
+```bash
+npm run dev -w apps/web
+```
+
+### Legacy backend fallback
+```bash
+npm run dev -w apps/server
+```
+
+### Full legacy mode
 ```bash
 npm run dev
 ```
 
-Default:
-- Backend API: `http://localhost:8787`
-- Frontend UI: `http://localhost:5173`
-
-Alternatif (Windows launcher):
-- `start-dev.bat`: jalankan server + frontend bersamaan
-- `start-server.bat`: jalankan server saja
-- `start-frontend.bat`: jalankan frontend saja
-
-## Menjalankan Dev Dari Laptop + Android (LAN)
-1. Cari IP laptop di jaringan Wi-Fi yang sama (contoh `192.168.1.20`).
-2. Default `.env` di repo ini cukup:
+## Cloudflare Pages Deploy
+1. Hubungkan repo ini ke Cloudflare Pages.
+2. Set build command:
+```bash
+npm install && npm run build -w apps/web
+```
+3. Set build output directory:
+```bash
+apps/web/dist
+```
+4. Tambahkan environment variable Pages Functions:
 ```env
-WEB_ORIGIN=http://localhost:5173
+GEMINI_API_KEY=...
 ```
-3. Jika ingin diakses dari Android/LAN, tambahkan origin browser HP juga, contoh:
-```env
-WEB_ORIGIN=http://localhost:5173,http://192.168.1.20:5173
-```
-4. Jalankan `npm run dev`.
-5. Buka dari HP Android (Chrome): `http://192.168.1.20:5173`.
+5. Pastikan folder `/functions` ikut terdeploy dari root project.
 
-Catatan:
-- Vite dev server sudah listen ke `0.0.0.0` agar bisa diakses dari perangkat LAN.
-- Frontend dev otomatis memakai hostname browser aktif ke backend port `8787`.
+Route proxy yang tersedia:
+- `POST /api/ai/analyze`
+- `POST /api/ai/script`
+- `POST /api/ai/metadata`
+- `POST /api/ai/tts`
+- `GET /api/tts/voices`
 
-## Menjalankan (build + start)
-```bash
-npm run build
-npm run start
-```
-
-## Deploy ke cPanel Node.js App (Single Service)
-1. Upload source project (tanpa folder cache lokal seperti `node_modules`).
-2. Buat `.env` di server:
-```env
-LITELLM_BASE_URL=http://localhost:4000/v1
-LITELLM_SECRET_KEY=...
-PORT=<port_dari_cpanel>
-WEB_ORIGIN=https://domain-anda
-```
-3. Install dependency:
-```bash
-npm install
-```
-4. Build aplikasi:
-```bash
-npm run build
-```
-5. Start aplikasi:
-```bash
-npm run start
-```
-6. Pastikan folder berikut writable oleh proses app: `data/`, `uploads/`, `outputs/`, `logs/`.
-7. Verifikasi:
-- `GET https://domain-anda/api/health`
-- buka UI di `https://domain-anda`
-- buat job, lalu cek link output `MP4` dan `Caption TXT` di tab `Jobs`
-
-## Endpoint API
-- `GET /api/health`
-- `GET /api/settings`
-- `PUT /api/settings`
-- `POST /api/jobs` (multipart: `video`, `title`, `description`)
-- `GET /api/jobs`
-- `GET /api/jobs/:jobId`
-- `POST /api/jobs/:jobId/retry` body `{ "platformId": "tiktok" | "youtube" | "facebook" | "shopee" }` untuk kompatibilitas retry platform gagal
-- `POST /api/jobs/:jobId/platforms/:platformId/retry-job`
-- `POST /api/jobs/:jobId/platforms/:platformId/retry-caption`
-- `PUT /api/jobs/:jobId/platforms/:platformId/metadata` body `{ "title": "...", "description": "...", "affiliateLink": "...", "captionText": "...", "hashtags": ["#tag"] }`
-- `POST /api/jobs/:jobId/open-location` body `{ "platformId": "tiktok" | "youtube" | "facebook" | "shopee" }` (opsional untuk environment Windows)
-
-## Catatan Operasional
-- Maks durasi video default: 60 detik (ubah di settings).
-- Proses style berjalan berurutan (sequential).
-- Jika satu style gagal, style lain tetap lanjut.
-- Riwayat job otomatis dipangkas maksimal 20 entry.
-- Log tersimpan di `logs/app.log`.
-- Output file di tab `Jobs` tersedia sebagai link langsung (browser-friendly untuk desktop dan Android).
-- Form `Generate` menyediakan kotak `Affiliate Link`.
-- Tab `Jobs` menampilkan caption final siap copy (caption + hashtag + affiliate link job).
-- `scriptModel` harus memakai ID model LiteLLM yang aktif di endpoint `/models`. Untuk hasil video-aware, gunakan model vision. Default project ini: `gemini/gemini-2.5-flash-image`.
-- `ttsModel` tetap model Gemini TTS untuk voice-over, dan request-nya diroute lewat LiteLLM. Contoh yang valid di proxy ini: `vertex_ai/gemini-2.5-flash-tts`.
-- Jika model utama sedang gagal atau unavailable di proxy, server otomatis fallback ke model LiteLLM lain yang masih tersedia agar caption/script tetap jalan.
-- Jika LiteLLM TTS atau Gemini TTS di belakangnya mengembalikan error di runtime, server hanya fallback ke Windows local TTS bila Windows punya voice Indonesia. Jika voice Indonesia tidak ada, proses akan gagal dengan pesan yang jelas agar tidak diam-diam menghasilkan aksen Inggris.
-- `LITELLM_BASE_URL` harus menunjuk ke endpoint LiteLLM OpenAI-compatible yang aktif, misalnya `http://localhost:4000/v1`.
-- Untuk script yang memakai video, backend mengekstrak 4 frame lokal dari video lalu mengirimnya sebagai `image_url` ke model vision LiteLLM; proxy `/files` tidak dipakai.
-- Daftar model aktif bisa dicek lewat endpoint `GET /models` pada proxy LiteLLM Anda.
+## Scripts
+- `npm run build`
+- `npm run test -w apps/web`
+- `npm run typecheck:functions`
 
 ## Testing
+Web regression yang sudah diverifikasi:
 ```bash
-npm run test
+npm run test -w apps/web
 ```
+
+Catatan:
+- Root `npm test` masih ikut menjalankan suite backend lama.
+- Saat ini masih ada failure pre-existing di backend test `visual-audit` pada Windows (`timeout/EBUSY`) yang tidak terkait jalur Cloudflare browser-local.

@@ -2,31 +2,56 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import * as api from "./api";
+import * as pipelineHook from "./lib/use-pipeline-state";
 
 vi.mock("./api", async () => {
   const actual = await vi.importActual<typeof import("./api")>("./api");
   return {
     ...actual,
     createJob: vi.fn(),
-    deleteJob: vi.fn(),
-    fetchSettings: vi.fn(),
-    fetchJobs: vi.fn(),
-    retryPlatform: vi.fn(),
-    retryPlatformCaption: vi.fn(),
-    retryPlatformJob: vi.fn(),
-    updateJob: vi.fn(),
-    updatePlatformMetadata: vi.fn()
+    fetchSettings: vi.fn()
   };
 });
+
+vi.mock("./lib/use-pipeline-state", () => ({
+  usePipelineState: vi.fn()
+}));
 
 describe("generate redirect", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(pipelineHook.usePipelineState).mockReturnValue({
+      initialized: true,
+      jobs: [],
+      settings: {
+        scriptModel: "gemini-2.5-pro",
+        ttsModel: "gemini-2.5-flash-preview-tts",
+        language: "id-ID",
+        maxVideoSeconds: 30,
+        safetyMode: "safe_marketing",
+        ctaPosition: "end",
+        ctaMode: "random",
+        ctaSequence: {
+          tiktok: 0,
+          youtube: 0,
+          facebook: 0,
+          shopee: 0
+        },
+        concurrency: 1,
+        platforms: [
+          { platformId: "tiktok", enabled: true, voiceName: "Leda", speechRate: 1 },
+          { platformId: "youtube", enabled: true, voiceName: "Charon", speechRate: 1 },
+          { platformId: "facebook", enabled: true, voiceName: "Aoede", speechRate: 1 },
+          { platformId: "shopee", enabled: true, voiceName: "Kore", speechRate: 1 }
+        ]
+      },
+      voices: []
+    });
     vi.mocked(api.fetchSettings).mockResolvedValue({
-      scriptModel: "gemini/gemini-2.5-flash-image",
-      ttsModel: "vertex_ai/gemini-2.5-flash-tts",
+      scriptModel: "gemini-2.5-pro",
+      ttsModel: "gemini-2.5-flash-preview-tts",
       language: "id-ID",
-      maxVideoSeconds: 60,
+      maxVideoSeconds: 30,
       safetyMode: "safe_marketing",
       ctaPosition: "end",
       ctaMode: "random",
@@ -44,7 +69,6 @@ describe("generate redirect", () => {
         { platformId: "shopee", enabled: true, voiceName: "Kore", speechRate: 1 }
       ]
     });
-    vi.mocked(api.fetchJobs).mockResolvedValue([]);
   });
 
   it("moves to jobs page and shows upload progress immediately", async () => {
@@ -67,7 +91,7 @@ describe("generate redirect", () => {
       target: { value: "https://contoh.test/affiliate" }
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /generate platform terpilih/i }));
+    fireEvent.click(screen.getByRole("button", { name: /analisis video & buat kandidat clip/i }));
 
     expect(await screen.findByText(/mengirim job baru/i)).toBeTruthy();
     expect(

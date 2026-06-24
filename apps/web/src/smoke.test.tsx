@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { GeneratePage } from "./pages/GeneratePage";
 import * as api from "./api";
+import * as pipelineHook from "./lib/use-pipeline-state";
 
 vi.mock("./api", async () => {
   const actual = await vi.importActual<typeof import("./api")>("./api");
@@ -10,27 +11,41 @@ vi.mock("./api", async () => {
     ...actual,
     createJob: vi.fn(),
     deleteJob: vi.fn(),
-    fetchJobDetail: vi.fn(),
-    fetchJobs: vi.fn(),
     fetchSettings: vi.fn(),
     fetchTtsVoices: vi.fn(),
-    openPlatformOutputLocation: vi.fn(),
     previewTtsVoice: vi.fn(),
+    reanalyzeJob: vi.fn(),
     replaceJobSource: vi.fn(),
-    retryPlatform: vi.fn(),
-    retryPlatformCaption: vi.fn(),
-    retryPlatformJob: vi.fn(),
-    updateJob: vi.fn(),
-    updatePlatformMetadata: vi.fn(),
+    selectClip: vi.fn(),
+    toArtifactObjectUrl: vi.fn(),
     updateSettings: vi.fn()
   };
 });
 
+vi.mock("./lib/use-pipeline-state", () => ({
+  usePipelineState: vi.fn()
+}));
+
+function artifactRef(name: string) {
+  return {
+    artifactId: `artifact-${name}`,
+    fileName: name,
+    mimeType: name.endsWith(".txt")
+      ? "text/plain"
+      : name.endsWith(".srt")
+        ? "application/x-subrip"
+        : "video/mp4",
+    size: 1024,
+    storage: "idb" as const,
+    createdAt: "2026-04-01T00:00:00.000Z"
+  };
+}
+
 const mockSettings = {
-  scriptModel: "gemini/gemini-2.5-flash-image",
-  ttsModel: "vertex_ai/gemini-2.5-flash-tts",
+  scriptModel: "gemini-2.5-pro",
+  ttsModel: "gemini-2.5-flash-preview-tts",
   language: "id-ID" as const,
-  maxVideoSeconds: 60,
+  maxVideoSeconds: 30,
   safetyMode: "safe_marketing" as const,
   ctaPosition: "end" as const,
   ctaMode: "random" as const,
@@ -42,30 +57,10 @@ const mockSettings = {
   },
   concurrency: 1 as const,
   platforms: [
-    {
-      platformId: "tiktok" as const,
-      enabled: true,
-      voiceName: "Leda",
-      speechRate: 1
-    },
-    {
-      platformId: "youtube" as const,
-      enabled: true,
-      voiceName: "Charon",
-      speechRate: 1
-    },
-    {
-      platformId: "facebook" as const,
-      enabled: true,
-      voiceName: "Aoede",
-      speechRate: 1
-    },
-    {
-      platformId: "shopee" as const,
-      enabled: true,
-      voiceName: "Kore",
-      speechRate: 1
-    }
+    { platformId: "tiktok" as const, enabled: true, voiceName: "Leda", speechRate: 1 },
+    { platformId: "youtube" as const, enabled: true, voiceName: "Charon", speechRate: 1 },
+    { platformId: "facebook" as const, enabled: true, voiceName: "Aoede", speechRate: 1 },
+    { platformId: "shopee" as const, enabled: true, voiceName: "Kore", speechRate: 1 }
   ]
 };
 
@@ -78,63 +73,59 @@ const mockVoices = {
       gender: "female" as const
     },
     {
-      voiceName: "Leda",
-      label: "Leda",
-      tone: "Youthful",
-      gender: "female" as const
-    },
-    {
-      voiceName: "Puck",
-      label: "Puck",
-      tone: "Upbeat",
+      voiceName: "Charon",
+      label: "Charon",
+      tone: "Informative",
       gender: "male" as const
     }
   ],
-  excitedPresets: [
-    {
-      presetId: "female_excited_v1",
-      label: "Excited Wanita V1",
-      version: "v1",
-      gender: "female" as const,
-      voiceName: "Leda"
-    }
-  ]
+  excitedPresets: []
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(pipelineHook.usePipelineState).mockReturnValue({
+    initialized: true,
+    jobs: [],
+    settings: mockSettings,
+    voices: mockVoices.voices
+  });
   vi.mocked(api.fetchSettings).mockResolvedValue(mockSettings);
   vi.mocked(api.fetchTtsVoices).mockResolvedValue(mockVoices);
-  vi.mocked(api.fetchJobs).mockResolvedValue([]);
   vi.mocked(api.updateSettings).mockResolvedValue(mockSettings);
+  vi.mocked(api.toArtifactObjectUrl).mockResolvedValue("blob:test");
 });
 
 describe("web smoke", () => {
-  it("renders the app shell and settings platform voice dropdown", async () => {
+  it("renders the app shell and youtube-only settings inputs", async () => {
     render(<App />);
 
-    expect(
-      screen.getByRole("heading", { name: /voice over video generator/i })
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /pengisi suara videoshort youtube/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Tutorial" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByDisplayValue(mockSettings.scriptModel)).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { name: /Aoede - Breezy/i }).length).toBeGreaterThan(
-        0
-      );
-    });
-    expect(screen.getByDisplayValue("Random")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /TikTok/i })).toBeTruthy();
+    expect(screen.getByDisplayValue(mockSettings.ttsModel)).toBeTruthy();
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("Charon");
+  });
+
+  it("opens the short tutorial page from the highlighted tutorial button", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tutorial" }));
+
+    expect(await screen.findByRole("heading", { name: /tutorial singkat aplikasi/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /analisis 6 frame penting/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /download hasil/i })).toBeTruthy();
   });
 
   it("shows generate form validation before submit", async () => {
     render(<GeneratePage />);
 
-    expect(await screen.findByRole("button", { name: /generate platform terpilih/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /analisis video & buat kandidat clip/i })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /generate platform terpilih/i }));
+    fireEvent.click(screen.getByRole("button", { name: /analisis video & buat kandidat clip/i }));
 
     expect(
       await screen.findByText(/Video, judul, deskripsi, dan affiliate link wajib diisi./i)
@@ -142,9 +133,9 @@ describe("web smoke", () => {
     expect(api.createJob).not.toHaveBeenCalled();
   });
 
-  it("submits only selected platforms from generate page", async () => {
+  it("submits youtube-only job from generate page", async () => {
     vi.mocked(api.createJob).mockResolvedValue({
-      jobId: "job-platform-choice",
+      jobId: "job-youtube-only",
       status: "queued"
     });
 
@@ -165,24 +156,24 @@ describe("web smoke", () => {
       target: { value: "https://contoh-affiliate.test/pilihan" }
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /youtube shorts/i }));
-    fireEvent.click(screen.getByRole("button", { name: /facebook/i }));
-
-    fireEvent.click(screen.getByRole("button", { name: /generate platform terpilih/i }));
+    fireEvent.click(screen.getByRole("button", { name: /analisis video & buat kandidat clip/i }));
 
     await waitFor(() => {
       expect(api.createJob).toHaveBeenCalledWith({
         video: expect.objectContaining({ name: "promo.mp4" }),
         title: "Promo Pilihan",
         description: "Deskripsi pilihan platform",
-        affiliateLink: "https://contoh-affiliate.test/pilihan",
-        platformIds: ["tiktok", "shopee"]
+        affiliateLink: "https://contoh-affiliate.test/pilihan"
       });
     });
   });
 
-  it("renders jobs page with multi-platform detail rows", async () => {
-    vi.mocked(api.fetchJobs).mockResolvedValue([
+  it("renders jobs page with clip candidates and final output", async () => {
+    vi.mocked(pipelineHook.usePipelineState).mockReturnValue({
+      initialized: true,
+      settings: mockSettings,
+      voices: mockVoices.voices,
+      jobs: [
       {
         jobId: "job-1",
         createdAt: "2026-04-01T00:00:00.000Z",
@@ -190,303 +181,60 @@ describe("web smoke", () => {
         title: "Job Satu",
         description: "Deskripsi Job",
         affiliateLink: "https://contoh-affiliate.test/job-1",
-        videoPath: "C:/video.mp4",
+        videoPath: artifactRef("source.mp4"),
         videoMimeType: "video/mp4",
-        videoDurationSec: 20,
-        overallStatus: "running",
+        videoDurationSec: 42,
+        workflow: "youtube_shorts" as const,
+        overallStatus: "success" as const,
+        analysisStatus: "done" as const,
+        clipCandidates: [
+          {
+            clipId: "clip_1",
+            startSec: 0,
+            endSec: 22,
+            durationSec: 22,
+            score: 8.8,
+            reason: "Hook visual langsung terlihat.",
+            previewPath: artifactRef("job-1-clip_1.mp4"),
+            frameTimestamps: [1, 10, 20]
+          }
+        ],
+        selectedClipId: "clip_1",
+        finalRender: {
+          status: "done" as const,
+          scriptText: "Naskah final.",
+          captionText: "Caption final.",
+          hashtags: ["#shorts", "#affiliate"],
+          mp4Path: artifactRef("job-1.mp4"),
+          srtPath: artifactRef("job-1.srt"),
+          captionPath: artifactRef("job-1-caption.txt"),
+          updatedAt: "2026-04-01T00:00:00.000Z"
+        },
         platforms: [
           {
-            platformId: "tiktok",
-            status: "running",
-            updatedAt: "2026-05-10T10:00:00.000Z",
-            errorMessage: "fetch failed",
-            retryAfter: "2099-04-01T00:00:00.000Z",
-            artifactPaths: []
-          },
-          {
-            platformId: "youtube",
-            status: "pending",
-            updatedAt: "2026-04-01T00:00:00.000Z",
-            artifactPaths: []
-          },
-          {
-            platformId: "facebook",
-            status: "pending",
-            updatedAt: "2026-04-01T00:00:00.000Z",
-            artifactPaths: []
-          },
-          {
-            platformId: "shopee",
-            status: "pending",
+            platformId: "youtube" as const,
+            status: "done" as const,
             updatedAt: "2026-04-01T00:00:00.000Z",
             artifactPaths: []
           }
-        ]
-      }
-    ]);
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
-
-    expect(await screen.findByRole("heading", { name: /detail job/i })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /job baru/i }).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Job Satu").length).toBeGreaterThan(0);
-    expect(screen.getByText("TikTok")).toBeTruthy();
-    expect(screen.getByText("Shopee")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /hapus job/i })).toBeTruthy();
-    expect(screen.getByRole("progressbar", { name: /progress render tiktok/i })).toBeTruthy();
-    expect(screen.getAllByText(/progress render/i).length).toBeGreaterThan(0);
-  });
-
-  it("hides legacy srt links and shows only mp4 plus caption outputs", async () => {
-    vi.mocked(api.fetchJobs).mockResolvedValue([
-      {
-        jobId: "job-legacy-srt",
-        createdAt: "2026-04-01T00:00:00.000Z",
-        updatedAt: "2026-04-01T00:00:00.000Z",
-        title: "Job Legacy",
-        description: "Deskripsi legacy",
-        affiliateLink: "https://contoh-affiliate.test/job-legacy",
-        videoPath: "C:/video.mp4",
-        videoMimeType: "video/mp4",
-        videoDurationSec: 20,
-        overallStatus: "success",
-        platforms: [
-          {
-            platformId: "tiktok",
-            status: "done",
-            updatedAt: "2026-04-01T00:00:00.000Z",
-            mp4Path: "/outputs/tiktok/job-legacy.mp4",
-            captionPath: "/outputs/tiktok/job-legacy-caption.txt",
-            srtPath: "/outputs/tiktok/job-legacy.srt",
-            visualAuditStatus: "skipped",
-            artifactPaths: [
-              "/outputs/tiktok/job-legacy.mp4",
-              "/outputs/tiktok/job-legacy-caption.txt",
-              "/outputs/tiktok/job-legacy.srt"
-            ]
-          },
-          {
-            platformId: "youtube",
-            status: "pending",
-            updatedAt: "2026-04-01T00:00:00.000Z",
-            artifactPaths: []
-          },
-          {
-            platformId: "facebook",
-            status: "pending",
-            updatedAt: "2026-04-01T00:00:00.000Z",
-            artifactPaths: []
-          },
-          {
-            platformId: "shopee",
-            status: "pending",
-            updatedAt: "2026-04-01T00:00:00.000Z",
-            artifactPaths: []
-          }
-        ]
-      }
-    ]);
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
-
-    expect(await screen.findByText(/Tersedia: MP4, Caption TXT/i)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "MP4" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Caption TXT" })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "SRT" })).toBeNull();
-    expect(screen.getByText("Audit: reference native")).toBeTruthy();
-  });
-
-  it("edits platform metadata and renders per-platform caption actions", async () => {
-    const job = {
-      jobId: "job-2",
-      createdAt: "2026-04-01T00:00:00.000Z",
-      updatedAt: "2026-04-01T00:00:00.000Z",
-      title: "Job Dua",
-      description: "Deskripsi Job Dua",
-      affiliateLink: "https://contoh-affiliate.test/job-2",
-      videoPath: "C:/video.mp4",
-      videoMimeType: "video/mp4",
-      videoDurationSec: 20,
-      overallStatus: "success" as const,
-      platforms: [
-        {
-          platformId: "tiktok" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          scriptText: "Script tersedia",
-          captionText: "Caption bersih.",
-          hashtags: ["#affiliate"],
-          artifactPaths: []
-        },
-        {
-          platformId: "youtube" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          artifactPaths: []
-        },
-        {
-          platformId: "facebook" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          artifactPaths: []
-        },
-        {
-          platformId: "shopee" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          artifactPaths: []
+        ],
+        runtime: {
+          deviceMode: "desktop" as const,
+          stage: "done" as const,
+          progress: 1,
+          statusMessage: "Render final selesai."
         }
-      ]
-    };
-    const updatedJob = {
-      ...job,
-      platforms: job.platforms.map((platform) =>
-        platform.platformId === "tiktok"
-          ? {
-              ...platform,
-              titleOverride: "Judul TikTok",
-              descriptionOverride: "Deskripsi TikTok",
-              affiliateLinkOverride: "https://contoh-affiliate.test/tiktok",
-              captionText: "Caption edit.",
-              hashtags: ["#edit"]
-            }
-          : platform
-      )
-    };
-    vi.mocked(api.fetchJobs).mockResolvedValue([job]);
-    vi.mocked(api.updatePlatformMetadata).mockResolvedValue(updatedJob);
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
-
-    expect(await screen.findByText("Caption bersih.")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /retry caption/i }).length).toBeGreaterThan(0);
-    const editButton = screen.getAllByRole("button", { name: "Edit" })[0];
-    if (!editButton) {
-      throw new Error("Edit button not found");
-    }
-    fireEvent.click(editButton);
-    await screen.findByRole("button", { name: /simpan platform/i });
-    fireEvent.change(screen.getByDisplayValue("Caption bersih."), {
-      target: { value: "Caption edit." }
-    });
-    fireEvent.change(screen.getByDisplayValue("#affiliate"), {
-      target: { value: "#edit" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /simpan platform/i }));
-
-    await waitFor(() => {
-      expect(api.updatePlatformMetadata).toHaveBeenCalledWith("job-2", "tiktok", {
-        title: "Job Dua",
-        description: "Deskripsi Job Dua",
-        affiliateLink: "https://contoh-affiliate.test/job-2",
-        captionText: "Caption edit.",
-        hashtags: ["#edit"]
-      });
-    });
-  });
-
-  it("replaces job source and clears stale output links", async () => {
-    const job = {
-      jobId: "job-source",
-      createdAt: "2026-04-01T00:00:00.000Z",
-      updatedAt: "2026-04-01T00:00:00.000Z",
-      title: "Job Source",
-      description: "Deskripsi Job Source",
-      affiliateLink: "https://contoh-affiliate.test/job-source",
-      videoPath: "C:/uploads/job-source/source.mp4",
-      videoMimeType: "video/mp4",
-      videoDurationSec: 21,
-      overallStatus: "partial_success" as const,
-      platforms: [
-        {
-          platformId: "tiktok" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          mp4Path: "/outputs/tiktok/job-source.mp4",
-          captionPath: "/outputs/tiktok/job-source-caption.txt",
-          captionText: "Caption lama.",
-          hashtags: ["#lama"],
-          artifactPaths: [
-            "/outputs/tiktok/job-source.mp4",
-            "/outputs/tiktok/job-source-caption.txt"
-          ]
-        },
-        {
-          platformId: "youtube" as const,
-          status: "failed" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          artifactPaths: []
-        },
-        {
-          platformId: "facebook" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          artifactPaths: []
-        },
-        {
-          platformId: "shopee" as const,
-          status: "done" as const,
-          updatedAt: "2026-04-01T00:00:00.000Z",
-          artifactPaths: []
-        }
-      ]
-    };
-    const updatedJob = {
-      ...job,
-      updatedAt: "2026-04-02T00:00:00.000Z",
-      videoPath: "C:/uploads/job-source/source.webm",
-      videoMimeType: "video/webm",
-      videoDurationSec: 18,
-      overallStatus: "failed" as const,
-      platforms: job.platforms.map((platform) => ({
-        ...platform,
-        status: "failed" as const,
-        errorMessage: "Source video diganti. Klik Retry Job untuk membuat output baru.",
-        mp4Path: undefined,
-        captionPath: undefined,
-        captionText: undefined,
-        hashtags: undefined,
-        artifactPaths: []
-      }))
-    };
-    vi.mocked(api.fetchJobs).mockResolvedValueOnce([job]).mockResolvedValue([updatedJob]);
-    vi.mocked(api.replaceJobSource).mockResolvedValue(updatedJob);
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
-
-    expect(await screen.findByRole("button", { name: /ganti source/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "MP4" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /ganti source/i }));
-
-    const fileInput = await screen.findByLabelText(/video source baru/i);
-    fireEvent.change(fileInput, {
-      target: {
-        files: [new File(["new-video"], "replacement.webm", { type: "video/webm" })]
       }
+    ]
     });
-    fireEvent.click(screen.getByRole("button", { name: /simpan source baru/i }));
 
-    await waitFor(() => {
-      expect(api.replaceJobSource).toHaveBeenCalledWith(
-        "job-source",
-        expect.objectContaining({
-          name: "replacement.webm"
-        })
-      );
-    });
-    expect(
-      await screen.findByText(
-        /Source utama berhasil diganti. Output lama dibersihkan, lalu gunakan Retry Job per platform untuk render ulang./i
-      )
-    ).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "MP4" })).toBeNull();
-    expect(screen.getAllByText(/Klik Retry Job untuk membuat output baru./i).length).toBeGreaterThan(
-      0
-    );
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
+
+    expect(await screen.findByRole("heading", { name: /output youtube shorts/i })).toBeTruthy();
+    expect(screen.getByText("clip_1")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /download mp4/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /download srt/i })).toBeTruthy();
+    expect(screen.getByText("Caption final.")).toBeTruthy();
   });
 });

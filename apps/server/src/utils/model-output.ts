@@ -284,6 +284,33 @@ export interface ExtractedAudio {
   mimeType: string;
 }
 
+export function extractClipCandidateScores(response: unknown): Array<{
+  clipId: string;
+  score: number;
+  reason: string;
+}> {
+  const raw = stripCodeFence(extractTextFromResponse(response));
+  const parsed = parseJsonValue(raw);
+  const items = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { candidates?: unknown[] } | undefined)?.candidates)
+      ? (parsed as { candidates: unknown[] }).candidates
+      : [];
+
+  return items
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const candidate = item as Record<string, unknown>;
+      const score = Number(candidate.score);
+      return {
+        clipId: String(candidate.clipId || "").trim(),
+        score: Number.isFinite(score) ? score : 0,
+        reason: String(candidate.reason || "").trim()
+      };
+    })
+    .filter((candidate) => candidate.clipId.length > 0);
+}
+
 export function extractAudioFromResponse(response: unknown): ExtractedAudio {
   const openAiAudio = (
     response as {

@@ -1,8 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
-import OpenAI from "openai";
+import { GoogleGenAI, createPartFromBase64, createPartFromText } from "@google/genai";
 import type {
   AIService,
+  AnalyzeClipCandidatesInput,
   AnalysisFrame,
+  ClipCandidate,
   GenerateScriptInput,
   GenerateSocialMetadataInput,
   SocialMetadata
@@ -13,45 +15,82 @@ import {
   getRetryDelayMs,
   isTransientLlmError
 } from "../utils/llm-error.js";
-import { extractSocialMetadata, extractScriptText } from "../utils/model-output.js";
+import {
+  extractClipCandidateScores,
+  extractScriptText,
+  extractSocialMetadata
+} from "../utils/model-output.js";
+import { parseDataUrl } from "../utils/gemini-models.js";
 import { withRetry } from "../utils/retry.js";
-import { buildReelsMetadataPrompt } from "./prompt-builder.js";
+import { buildClipSelectionPrompt, buildReelsMetadataPrompt } from "./prompt-builder.js";
 
-interface OpenAiLikeClient {
-  chat: {
-    completions: {
-      create(input: unknown): Promise<unknown>;
-    };
+interface GeminiModelsClient {
+  models: {
+    generateContent(input: unknown): Promise<unknown>;
   };
 }
 
 const VISION_MODEL_FALLBACKS = [
-  "gemini/gemini-2.5-flash-image",
-  "gemini/gemini-3.1-flash-image-preview"
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image-preview"
 ];
 
-const TEXT_MODEL_FALLBACKS = [
-  "gemini-3-flash-preview",
-  "gemini/gemini-2.5-flash",
-  "openai/gpt-4.1-mini"
-];
+const TEXT_MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-3-flash-preview"];
 
-export class LiteLlmContentService implements AIService {
-  private readonly client: OpenAiLikeClient;
+function buildContentParts(prompt: string, frames: AnalysisFrame[]) {
+  return [
+    createPartFromText(prompt),
+    ...frames.flatMap((frame, index) => {
+      const parsed = parseDataUrl(frame.dataUrl);
+      return [
+        createPartFromText(`Frame ${index + 1} pada ${frame.timestampSec.toFixed(2)} detik.`),
+        createPartFromBase64(parsed.base64, parsed.mimeType)
+      ];
+    })
+  ];
+}
+
+function buildClipCandidateContentParts(input: AnalyzeClipCandidatesInput) {
+  const prompt = buildClipSelectionPrompt({
+    title: input.title,
+    description: input.description,
+    affiliateLink: input.affiliateLink,
+    candidates: input.candidates.map((candidate) => ({
+      clipId: candidate.clipId,
+      startSec: candidate.startSec,
+      endSec: candidate.endSec,
+      durationSec: candidate.durationSec
+    }))
+  });
+
+  return [
+    createPartFromText(prompt),
+    ...input.candidates.flatMap((candidate) => [
+      createPartFromText(
+        `Kandidat ${candidate.clipId} pada ${candidate.startSec.toFixed(2)}-${candidate.endSec.toFixed(2)} detik.`
+      ),
+      ...candidate.frames.flatMap((frame, index) => {
+        const parsed = parseDataUrl(frame.dataUrl);
+        return [
+          createPartFromText(
+            `Frame ${index + 1} kandidat ${candidate.clipId} pada ${frame.timestampSec.toFixed(2)} detik.`
+          ),
+          createPartFromBase64(parsed.base64, parsed.mimeType)
+        ];
+      })
+    ])
+  ];
+}
+
+export class GeminiContentService implements AIService {
+  private readonly client: GeminiModelsClient;
 
   public constructor(
-    apiBase: string,
     apiKey: string,
     private readonly logger: FastifyBaseLogger,
-    client?: OpenAiLikeClient
+    client?: GeminiModelsClient
   ) {
-    this.client =
-      client ??
-      new OpenAI({
-        apiKey,
-        baseURL: apiBase,
-        maxRetries: 0
-      });
+    this.client = client ?? new GoogleGenAI({ apiKey });
   }
 
   public async generateScript(input: GenerateScriptInput): Promise<string> {
@@ -62,16 +101,19 @@ export class LiteLlmContentService implements AIService {
       for (const model of this.listVisionModels(input.model)) {
         for (const prompt of prompts) {
           try {
-            const response = await this.createChatCompletion({
+            const response = await this.createContent({
               model,
-              messages: this.buildVisionPromptMessages(prompt, input.frames)
+              contents: buildContentParts(
+                `${prompt}\n\nGunakan frame video berikut untuk memahami konteks visual video.`,
+                input.frames
+              )
             });
             const script = extractScriptText(response);
             if (script) {
               if (model !== input.model) {
                 this.logger.warn(
                   { requestedModel: input.model, fallbackModel: model },
-                  "Script video-aware dipindah ke model fallback LiteLLM."
+                  "Generate script video-aware dipindah ke model Gemini fallback."
                 );
               }
               return script;
@@ -79,17 +121,17 @@ export class LiteLlmContentService implements AIService {
 
             this.logger.warn(
               { model },
-              "Script multimodal kosong dari LiteLLM, mencoba prompt atau model berikutnya."
+              "Script multimodal kosong dari Gemini, mencoba prompt atau model berikutnya."
             );
           } catch (error) {
             lastVisionError = error;
             if (!this.shouldTryAlternativeModel(error)) {
-              throw this.normalizeChatCompletionError(error, input.model);
+              throw this.normalizeGenerateError(error, input.model);
             }
 
             this.logger.warn(
               { err: error, requestedModel: input.model, fallbackModel: model },
-              "Generate script multimodal gagal di model ini, mencoba fallback vision lain."
+              "Generate script multimodal gagal di model ini, mencoba fallback vision Gemini lain."
             );
           }
         }
@@ -97,7 +139,7 @@ export class LiteLlmContentService implements AIService {
 
       this.logger.warn(
         { err: lastVisionError, model: input.model },
-        "Semua percobaan vision LiteLLM gagal, fallback ke generate script text-only."
+        "Semua percobaan vision Gemini gagal, fallback ke generate script text-only."
       );
     } else {
       this.logger.warn(
@@ -123,18 +165,18 @@ export class LiteLlmContentService implements AIService {
     let lastError: unknown;
     for (const model of this.listTextModels(input.model)) {
       try {
-        const response = await this.createChatCompletion({
+        const response = await this.createContent({
           model,
-          messages: this.buildTextPromptMessages(prompt),
-          response_format: {
-            type: "json_object"
+          contents: [createPartFromText(prompt)],
+          config: {
+            responseMimeType: "application/json"
           }
         });
 
         if (model !== input.model) {
           this.logger.warn(
             { requestedModel: input.model, fallbackModel: model },
-            "Caption/hashtags dipindah ke model fallback LiteLLM."
+            "Caption/hashtags dipindah ke model Gemini fallback."
           );
         }
 
@@ -142,18 +184,68 @@ export class LiteLlmContentService implements AIService {
       } catch (error) {
         lastError = error;
         if (!this.shouldTryAlternativeModel(error)) {
-          throw this.normalizeChatCompletionError(error, input.model);
+          throw this.normalizeGenerateError(error, input.model);
         }
 
         this.logger.warn(
           { err: error, requestedModel: input.model, fallbackModel: model },
-          "Generate caption/hashtags gagal di model ini, mencoba fallback text LiteLLM lain."
+          "Generate caption/hashtags gagal di model ini, mencoba fallback text Gemini lain."
         );
       }
     }
 
-    throw this.normalizeChatCompletionError(
-      lastError ?? new Error("LiteLLM gagal membuat caption dan hashtags."),
+    throw this.normalizeGenerateError(
+      lastError ?? new Error("Gemini gagal membuat caption dan hashtags."),
+      input.model
+    );
+  }
+
+  public async analyzeClipCandidates(input: AnalyzeClipCandidatesInput): Promise<ClipCandidate[]> {
+    let lastError: unknown;
+
+    for (const model of this.listVisionModels(input.model)) {
+      try {
+        const response = await this.createContent({
+          model,
+          contents: buildClipCandidateContentParts(input),
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+        const parsed = extractClipCandidateScores(response);
+        if (!parsed.length) {
+          continue;
+        }
+
+        const byClipId = new Map(parsed.map((candidate) => [candidate.clipId, candidate]));
+        return input.candidates.map((candidate) => {
+          const scored = byClipId.get(candidate.clipId);
+          return {
+            clipId: candidate.clipId,
+            startSec: candidate.startSec,
+            endSec: candidate.endSec,
+            durationSec: candidate.durationSec,
+            frameTimestamps: candidate.frameTimestamps,
+            previewPath: undefined,
+            score: scored?.score ?? 0,
+            reason: scored?.reason || "Potongan ini layak, tetapi alasan spesifik tidak diberikan model."
+          };
+        });
+      } catch (error) {
+        lastError = error;
+        if (!this.shouldTryAlternativeModel(error)) {
+          throw this.normalizeGenerateError(error, input.model);
+        }
+
+        this.logger.warn(
+          { err: error, requestedModel: input.model, fallbackModel: model },
+          "Analisis kandidat clip gagal di model ini, mencoba fallback vision Gemini lain."
+        );
+      }
+    }
+
+    throw this.normalizeGenerateError(
+      lastError ?? new Error("Gemini gagal menilai kandidat clip."),
       input.model
     );
   }
@@ -166,15 +258,15 @@ export class LiteLlmContentService implements AIService {
     for (const model of this.listTextModels(preferredModel)) {
       for (const prompt of prompts) {
         try {
-          const response = await this.createChatCompletion({
+          const response = await this.createContent({
             model,
-            messages: this.buildTextPromptMessages(prompt)
+            contents: [createPartFromText(prompt)]
           });
           const script = extractScriptText(response);
           if (!script) {
             this.logger.warn(
               { model },
-              "Script text-only kosong dari LiteLLM, mencoba prompt atau model berikutnya."
+              "Script text-only kosong dari Gemini, mencoba prompt atau model berikutnya."
             );
             continue;
           }
@@ -182,7 +274,7 @@ export class LiteLlmContentService implements AIService {
           if (model !== preferredModel) {
             this.logger.warn(
               { requestedModel: preferredModel, fallbackModel: model },
-              "Script dipindah ke model fallback LiteLLM."
+              "Script dipindah ke model Gemini fallback."
             );
           }
 
@@ -190,19 +282,19 @@ export class LiteLlmContentService implements AIService {
         } catch (error) {
           lastError = error;
           if (!this.shouldTryAlternativeModel(error)) {
-            throw this.normalizeChatCompletionError(error, preferredModel);
+            throw this.normalizeGenerateError(error, preferredModel);
           }
 
           this.logger.warn(
             { err: error, requestedModel: preferredModel, fallbackModel: model },
-            "Generate script text-only gagal di model ini, mencoba fallback LiteLLM lain."
+            "Generate script text-only gagal di model ini, mencoba fallback Gemini lain."
           );
         }
       }
     }
 
-    throw this.normalizeChatCompletionError(
-      lastError ?? new Error("LiteLLM mengembalikan script kosong."),
+    throw this.normalizeGenerateError(
+      lastError ?? new Error("Gemini mengembalikan script kosong."),
       preferredModel
     );
   }
@@ -214,41 +306,6 @@ export class LiteLlmContentService implements AIService {
     ];
   }
 
-  private buildTextPromptMessages(prompt: string) {
-    return [
-      {
-        role: "user",
-        content: prompt
-      }
-    ];
-  }
-
-  private buildVisionPromptMessages(prompt: string, frames: AnalysisFrame[]) {
-    return [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `${prompt}\n\nGunakan frame video berikut untuk memahami konteks visual video.`
-          },
-          ...frames.flatMap((frame, index) => [
-            {
-              type: "text",
-              text: `Frame ${index + 1} pada ${frame.timestampSec.toFixed(2)} detik.`
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: frame.dataUrl
-              }
-            }
-          ])
-        ]
-      }
-    ];
-  }
-
   private listVisionModels(preferredModel: string): string[] {
     return [...new Set([preferredModel, ...VISION_MODEL_FALLBACKS])];
   }
@@ -257,8 +314,8 @@ export class LiteLlmContentService implements AIService {
     return [...new Set([preferredModel, ...TEXT_MODEL_FALLBACKS])];
   }
 
-  private async createChatCompletion(input: Record<string, unknown>): Promise<unknown> {
-    return withRetry(() => this.client.chat.completions.create(input), {
+  private async createContent(input: Record<string, unknown>): Promise<unknown> {
+    return withRetry(() => this.client.models.generateContent(input), {
       attempts: 3,
       baseDelayMs: 700,
       shouldRetry: isTransientLlmError,
@@ -276,7 +333,6 @@ export class LiteLlmContentService implements AIService {
     return (
       !statusCode ||
       [400, 404, 408, 409, 423, 425, 429, 500, 502, 503, 504].includes(statusCode) ||
-      message.includes("all upstream providers failed") ||
       message.includes("not found") ||
       message.includes("unsupported") ||
       message.includes("unavailable") ||
@@ -285,30 +341,35 @@ export class LiteLlmContentService implements AIService {
       message.includes("image") ||
       message.includes("vision") ||
       message.includes("multimodal") ||
-      message.includes("timeout")
+      message.includes("timeout") ||
+      message.includes("quota")
     );
   }
 
-  private normalizeChatCompletionError(error: unknown, requestedModel: string): Error {
+  private normalizeGenerateError(error: unknown, requestedModel: string): Error {
     const statusCode = extractStatusCode(error);
     const message = extractErrorMessage(error);
     const lowerMessage = message.toLowerCase();
 
-    if (statusCode === 404 || lowerMessage.includes("not found") || lowerMessage.includes("invalid model")) {
+    if (
+      statusCode === 404 ||
+      lowerMessage.includes("not found") ||
+      lowerMessage.includes("invalid model")
+    ) {
       return new Error(
-        `${message}. Pastikan scriptModel tersedia di endpoint LiteLLM /models dan gunakan ID model lengkap, misalnya gemini/gemini-2.5-flash-image.`
+        `${message}. Pastikan scriptModel memakai ID model Gemini yang didukung, misalnya gemini-2.5-pro.`
       );
     }
 
     if (statusCode === 400 && (lowerMessage.includes("image") || lowerMessage.includes("vision"))) {
       return new Error(
-        `${message}. Model ${requestedModel} tidak bisa memproses input vision lewat LiteLLM. Pilih model vision yang aktif di /models, misalnya gemini/gemini-2.5-flash-image.`
+        `${message}. Model ${requestedModel} tidak bisa memproses input vision lewat Gemini. Pilih model vision yang aktif, misalnya gemini-2.5-pro.`
       );
     }
 
     if (statusCode === 429) {
       return new Error(
-        `${message}. LiteLLM atau provider upstream sedang membatasi permintaan; cek kuota, budget, atau rate limit key yang aktif.`
+        `${message}. Gemini API sedang membatasi permintaan; cek kuota atau rate limit API key Anda.`
       );
     }
 
