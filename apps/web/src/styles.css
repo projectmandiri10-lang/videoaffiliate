@@ -433,6 +433,44 @@ select:disabled {
   margin-top: 30px;
 }
 
+.generate-page__explainer {
+  display: grid;
+  gap: 12px;
+  margin-top: 26px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.generate-guide-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.generate-guide-card__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--warning);
+}
+
+.generate-guide-card h3 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.02rem;
+}
+
+.generate-guide-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .generate-page__form {
   padding: 30px;
   display: grid;
@@ -1115,6 +1153,7 @@ select:focus {
   .generate-page,
   .jobs-page,
   .split-layout,
+  .generate-page__explainer,
   .tutorial-grid,
   .settings-core__grid,
   .style-grid {

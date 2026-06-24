@@ -102,6 +102,8 @@ describe("web smoke", () => {
 
     expect(screen.getByRole("heading", { name: /pengisi suara videoshort youtube/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Tutorial" })).toBeTruthy();
+    expect(screen.getByText(/affiliate shopee ke youtube shorts/i)).toBeTruthy();
+    expect(screen.getByText(/6 frame dianalisis, 3 clip disiapkan/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 

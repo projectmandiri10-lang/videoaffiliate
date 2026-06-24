@@ -46,7 +46,10 @@ export default function App() {
               <p className="eyebrow">Clippers Workflow</p>
               <h1>PENGISI SUARA VIDEOSHORT YOUTUBE</h1>
               <p className="app-brand__copy">
-                Upload video produk maksimal 30 detik, analisis 6 frame penting langsung di browser, lalu render Shorts final dengan voice over affiliate Gemini yang lebih hook-first.
+                Untuk video affiliate Shopee yang ingin diposting ke YouTube Shorts:
+                upload video produk maksimal 30 detik, analisis 6 frame penting langsung
+                di browser, lalu render voice over dengan hook, CTA, dan caption yang
+                lebih siap promosi.
               </p>
             </div>
           </div>

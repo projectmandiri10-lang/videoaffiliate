@@ -2,6 +2,27 @@ import { useState, type DragEvent, type FormEvent } from "react";
 import { createJob } from "../api";
 import type { JobCreationTransition } from "../job-creation";
 
+const HOMEPAGE_GUIDES = [
+  {
+    label: "Cocok untuk",
+    title: "Affiliate Shopee ke YouTube Shorts",
+    description:
+      "Aplikasi ini dirancang untuk video produk Shopee yang ingin diubah menjadi Shorts dengan voice over jualan yang lebih rapi, cepat, dan fokus ke klik affiliate."
+  },
+  {
+    label: "Cara kerja",
+    title: "6 frame dianalisis, 3 clip disiapkan",
+    description:
+      "Browser mengambil 6 frame penting untuk Gemini, lalu menyusun 3 kandidat clip dengan hook paling cepat. Anda tinggal pilih yang paling kuat."
+  },
+  {
+    label: "Hasil akhir",
+    title: "MP4, subtitle, caption, dan CTA",
+    description:
+      "Output akhir sudah diarahkan untuk YouTube Shorts: voice over singkat, CTA kuat, caption SEO-friendly, dan file siap download tanpa server render."
+  }
+] as const;
+
 interface GeneratePageProps {
   onSubmissionStateChange?: (transition: JobCreationTransition) => void;
 }
@@ -109,10 +130,12 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
           <span>Analyze</span>
         </div>
         <div className="generate-page__hero-copy">
-          <p className="eyebrow">YouTube Shorts Clippers</p>
-          <h2>Upload satu video produk maksimal 30 detik, lalu browser pilih 3 momen terbaik.</h2>
+          <p className="eyebrow">Shopee Affiliate For YouTube Shorts</p>
+          <h2>Buat voice over video affiliate Shopee yang lebih siap upload ke YouTube Shorts.</h2>
           <p className="page-intro">
-            Workflow ini khusus untuk YouTube Shorts affiliate: source maksimal 30 detik, Gemini menganalisa 6 frame penting, lalu voice over dan CTA dibuat lebih tajam untuk hook dan klik link.
+            Halaman ini khusus untuk kreator yang ambil video produk Shopee lalu ingin
+            mengubahnya menjadi konten YouTube Shorts dengan hook cepat, CTA jelas, dan
+            caption yang lebih mudah dipakai untuk promosi affiliate.
           </p>
         </div>
         <div className="hero-badge-grid">
@@ -138,6 +161,15 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
             <span className="footer-pill__dot footer-pill__dot--violet" />
             Tab harus tetap terbuka
           </div>
+        </div>
+        <div className="generate-page__explainer" aria-label="Penjelasan utama aplikasi">
+          {HOMEPAGE_GUIDES.map((guide) => (
+            <article key={guide.title} className="generate-guide-card">
+              <span className="generate-guide-card__label">{guide.label}</span>
+              <h3>{guide.title}</h3>
+              <p>{guide.description}</p>
+            </article>
+          ))}
         </div>
       </div>
 
