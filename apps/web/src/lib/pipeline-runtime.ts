@@ -132,6 +132,8 @@ export class PipelineRuntime {
 
   private voices: TtsVoiceOption[] = GEMINI_TTS_VOICES;
 
+  private cachedSnapshot: PipelineSnapshot | null = null;
+
   public constructor() {
     this.workerClient.onLog((message) => {
       const latestJob = this.jobs.find((job) => this.activeJobs.has(job.jobId));
@@ -160,12 +162,15 @@ export class PipelineRuntime {
   }
 
   public getSnapshot(): PipelineSnapshot {
-    return {
-      initialized: this.initialized,
-      jobs: [...this.jobs],
-      settings: this.settings,
-      voices: this.voices
-    };
+    if (!this.cachedSnapshot) {
+      this.cachedSnapshot = {
+        initialized: this.initialized,
+        jobs: [...this.jobs],
+        settings: this.settings,
+        voices: this.voices
+      };
+    }
+    return this.cachedSnapshot;
   }
 
   public async ensureInitialized(): Promise<void> {
@@ -710,6 +715,7 @@ export class PipelineRuntime {
   }
 
   private async emit(): Promise<void> {
+    this.cachedSnapshot = null;
     const snapshot = this.getSnapshot();
     for (const listener of this.listeners) {
       listener(snapshot);
