@@ -75,6 +75,7 @@ apps/web/dist
 GEMINI_API_KEY=...
 ```
 5. Pastikan folder `/functions` ikut terdeploy dari root project.
+6. Repo ini sekarang punya `prebuild` self-healing untuk Rollup native binary, jadi kalau Cloudflare/npm melewatkan optional dependency platform-specific, build web akan mencoba memasang paket Rollup yang sesuai platform sebelum `vite build`.
 
 Route proxy yang tersedia:
 - `POST /api/ai/analyze`
