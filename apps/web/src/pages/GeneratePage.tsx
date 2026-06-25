@@ -163,21 +163,7 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
 
   return (
     <section className="page-shell generate-page glass-panel">
-      <div className="generate-page__hero">
-        <div className="page-kicker">
-          <i className="ti ti-scissors" />
-          <span>Analyze</span>
-        </div>
-        <div className="generate-page__hero-copy">
-          <p className="eyebrow">Simple Workflow</p>
-          <h2>Upload video, pilih hasil terbaik, lalu unduh videonya.</h2>
-          <p className="page-intro">
-            Tampilan ini dibuat sederhana agar mudah dipakai. Anda cukup menyiapkan video
-            produk, isi informasi singkat, lalu tunggu hasil suara dan subtitle selesai dibuat.
-          </p>
-        </div>
 
-      </div>
 
       <div className="generate-page__form">
         <form onSubmit={onSubmit} className="grid-form">
