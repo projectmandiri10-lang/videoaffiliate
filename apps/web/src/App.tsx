@@ -42,7 +42,7 @@ export default function App() {
             </div>
             <div>
               <p className="eyebrow">Video Affiliate</p>
-              <h1>Pembuat suara video affiliate</h1>
+              <h1>Voice Over untuk YouTube Shorts Affiliate Video</h1>
               <p className="app-brand__copy">
                 Upload video produk singkat, pilih potongan terbaik, lalu download hasil
                 video dengan suara, subtitle, dan caption yang siap dipakai.

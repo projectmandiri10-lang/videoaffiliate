@@ -176,39 +176,7 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
             produk, isi informasi singkat, lalu tunggu hasil suara dan subtitle selesai dibuat.
           </p>
         </div>
-        <div className="hero-badge-grid">
-          <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Video</span>
-            <strong>1 video per proses</strong>
-          </div>
-          <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Durasi</span>
-            <strong>Maksimal 30 detik</strong>
-          </div>
-          <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Hasil</span>
-            <strong>Video + subtitle + caption</strong>
-          </div>
-        </div>
-        <div className="hero-pills">
-          <div className="footer-pill">
-            <span className="footer-pill__dot footer-pill__dot--cyan" />
-            Cocok untuk affiliate video pendek
-          </div>
-          <div className="footer-pill">
-            <span className="footer-pill__dot footer-pill__dot--violet" />
-            Tab harus tetap terbuka
-          </div>
-        </div>
-        <div className="generate-page__explainer" aria-label="Penjelasan utama aplikasi">
-          {HOMEPAGE_GUIDES.map((guide) => (
-            <article key={guide.title} className="generate-guide-card">
-              <span className="generate-guide-card__label">{guide.label}</span>
-              <h3>{guide.title}</h3>
-              <p>{guide.description}</p>
-            </article>
-          ))}
-        </div>
+
       </div>
 
       <div className="generate-page__form">
