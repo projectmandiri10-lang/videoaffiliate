@@ -9,21 +9,13 @@ const TUTORIAL_STEPS = [
     description:
       "Lengkapi judul, deskripsi, dan affiliate link. Sistem akan membangun hook, CTA, caption, dan arah voice over dari brief ini."
   },
-  {
-    title: "Analisis 6 frame penting",
-    description:
-      "Gemini hanya menerima 6 frame terpilih agar proses tetap ringan. Dari sana app menyusun 3 kandidat clip Shorts yang paling kuat."
-  },
+
   {
     title: "Pilih clip terbaik",
     description:
       "Bandingkan alasan skor tiap kandidat, lalu pilih clip dengan hook paling cepat, visual paling jelas, dan potensi CTA terbaik untuk audience Shorts."
   },
-  {
-    title: "Render final di browser",
-    description:
-      "Tab harus tetap terbuka saat render. Voice over, subtitle, dan MP4 akhir dirakit langsung di perangkat kamu tanpa upload video penuh ke server."
-  },
+
   {
     title: "Download hasil",
     description:
