@@ -43,7 +43,7 @@ export const PLATFORM_CONFIG: Record<PlatformId, PlatformDefinition> = {
     tone: "informative",
     hook: "problem_solution",
     srtStyle: "clear",
-    defaultVoiceName: "Charon",
+    defaultVoiceName: "Despina",
     defaultSpeechRate: 1,
     ctaVariants: [
       "cek link produk di deskripsi untuk lihat detail lengkapnya",

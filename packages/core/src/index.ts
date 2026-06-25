@@ -7,4 +7,5 @@ export * from "./settings.js";
 export * from "./prompt-builder.js";
 export * from "./model-output.js";
 export * from "./clip-candidates.js";
+export * from "./job-normalization.js";
 export * from "./srt.js";

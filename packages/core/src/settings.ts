@@ -9,10 +9,13 @@ function clamp(value: number, min: number, max: number): number {
 
 function normalizePlatform(platformId: PlatformId, candidate?: Partial<PlatformSettings>): PlatformSettings {
   const fallback = DEFAULT_SETTINGS.platforms.find((item) => item.platformId === platformId)!;
-  const voiceName =
+  let voiceName =
     typeof candidate?.voiceName === "string" && findTtsVoiceByName(candidate.voiceName)
       ? candidate.voiceName
       : fallback.voiceName;
+  if (platformId === "youtube" && voiceName === "Charon") {
+    voiceName = fallback.voiceName;
+  }
   const speechRate =
     typeof candidate?.speechRate === "number"
       ? clamp(candidate.speechRate, 0.7, 1.3)

@@ -42,7 +42,7 @@ function artifactRef(name: string) {
 }
 
 const mockSettings = {
-  scriptModel: "gemini-2.5-pro",
+  scriptModel: "gemini-3.5-flash",
   ttsModel: "gemini-2.5-flash-preview-tts",
   language: "id-ID" as const,
   maxVideoSeconds: 30,
@@ -58,7 +58,7 @@ const mockSettings = {
   concurrency: 1 as const,
   platforms: [
     { platformId: "tiktok" as const, enabled: true, voiceName: "Leda", speechRate: 1 },
-    { platformId: "youtube" as const, enabled: true, voiceName: "Charon", speechRate: 1 },
+    { platformId: "youtube" as const, enabled: true, voiceName: "Despina", speechRate: 1 },
     { platformId: "facebook" as const, enabled: true, voiceName: "Aoede", speechRate: 1 },
     { platformId: "shopee" as const, enabled: true, voiceName: "Kore", speechRate: 1 }
   ]
@@ -73,9 +73,15 @@ const mockVoices = {
       gender: "female" as const
     },
     {
-      voiceName: "Charon",
-      label: "Charon",
-      tone: "Informative",
+      voiceName: "Despina",
+      label: "Despina",
+      tone: "Smooth",
+      gender: "female" as const
+    },
+    {
+      voiceName: "Iapetus",
+      label: "Iapetus",
+      tone: "Clear",
       gender: "male" as const
     }
   ],
@@ -97,19 +103,14 @@ beforeEach(() => {
 });
 
 describe("web smoke", () => {
-  it("renders the app shell and youtube-only settings inputs", async () => {
+  it("renders the simplified app shell without settings tab", async () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: /pengisi suara videoshort youtube/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /pembuat suara video affiliate/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Tutorial" })).toBeTruthy();
-    expect(screen.getByText(/affiliate shopee ke youtube shorts/i)).toBeTruthy();
-    expect(screen.getByText(/6 frame dianalisis, 3 clip disiapkan/i)).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-
-    expect(await screen.findByDisplayValue(mockSettings.scriptModel)).toBeTruthy();
-    expect(screen.getByDisplayValue(mockSettings.ttsModel)).toBeTruthy();
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("Charon");
+    expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+    expect(screen.getByText(/upload video, pilih hasil terbaik, lalu unduh videonya/i)).toBeTruthy();
+    expect(screen.getByText(/download hasil jadi/i)).toBeTruthy();
   });
 
   it("opens the short tutorial page from the highlighted tutorial button", async () => {
@@ -125,9 +126,9 @@ describe("web smoke", () => {
   it("shows generate form validation before submit", async () => {
     render(<GeneratePage />);
 
-    expect(await screen.findByRole("button", { name: /analisis video & buat kandidat clip/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /buat hasil video/i })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /analisis video & buat kandidat clip/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buat hasil video/i }));
 
     expect(
       await screen.findByText(/Video, judul, deskripsi, dan affiliate link wajib diisi./i)
@@ -158,7 +159,7 @@ describe("web smoke", () => {
       target: { value: "https://contoh-affiliate.test/pilihan" }
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /analisis video & buat kandidat clip/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buat hasil video/i }));
 
     await waitFor(() => {
       expect(api.createJob).toHaveBeenCalledWith({
@@ -167,6 +168,25 @@ describe("web smoke", () => {
         description: "Deskripsi pilihan platform",
         affiliateLink: "https://contoh-affiliate.test/pilihan"
       });
+    });
+  });
+
+  it("lets the user switch the featured youtube narrator voice", async () => {
+    render(<GeneratePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /pria realistis/i }));
+
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          platforms: expect.arrayContaining([
+            expect.objectContaining({
+              platformId: "youtube",
+              voiceName: "Iapetus"
+            })
+          ])
+        })
+      );
     });
   });
 
@@ -231,9 +251,9 @@ describe("web smoke", () => {
     });
 
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Jobs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hasil" }));
 
-    expect(await screen.findByRole("heading", { name: /output youtube shorts/i })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /video siap diunduh/i })).toBeTruthy();
     expect(screen.getByText("clip_1")).toBeTruthy();
     expect(screen.getByRole("button", { name: /download mp4/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /download srt/i })).toBeTruthy();

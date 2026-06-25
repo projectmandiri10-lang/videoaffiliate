@@ -1,18 +1,29 @@
-export const DEFAULT_GEMINI_SCRIPT_MODEL = "gemini-2.5-pro";
+export const DEFAULT_GEMINI_SCRIPT_MODEL = "gemini-3.5-flash";
 export const DEFAULT_GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
+const SUPPORTED_GEMINI_SCRIPT_MODELS = new Set([
+  DEFAULT_GEMINI_SCRIPT_MODEL,
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash"
+]);
+
 const LEGACY_GEMINI_SCRIPT_MODEL_ALIASES: Record<string, string> = {
-  "gemini/gemini-2.5-flash-image": DEFAULT_GEMINI_SCRIPT_MODEL,
-  "gemini-2.5-flash-image": DEFAULT_GEMINI_SCRIPT_MODEL,
+  "gemini/gemini-2.5-flash-image": "gemini-2.5-flash",
+  "gemini-2.5-flash-image": "gemini-2.5-flash",
   "gemini/gemini-2.5-pro": DEFAULT_GEMINI_SCRIPT_MODEL,
   "google/gemini-2.5-pro": DEFAULT_GEMINI_SCRIPT_MODEL,
-  "google/gemini-2.5-flash-image": DEFAULT_GEMINI_SCRIPT_MODEL,
-  "gemini/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
+  "google/gemini-2.5-flash-image": "gemini-2.5-flash",
+  "gemini/gemini-3.1-flash-image-preview": "gemini-3.1-flash-lite",
   "gemini/gemini-2.5-flash": "gemini-2.5-flash",
   "gemini/gemini-3-flash-preview": "gemini-3-flash-preview",
-  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
+  "google/gemini-3.1-flash-image-preview": "gemini-3.1-flash-lite",
   "google/gemini-2.5-flash": "gemini-2.5-flash",
-  "google/gemini-3-flash-preview": "gemini-3-flash-preview"
+  "google/gemini-3-flash-preview": "gemini-3-flash-preview",
+  "gemini/gemini-3.5-flash": DEFAULT_GEMINI_SCRIPT_MODEL,
+  "google/gemini-3.5-flash": DEFAULT_GEMINI_SCRIPT_MODEL,
+  "gemini/gemini-3.1-flash-lite": "gemini-3.1-flash-lite",
+  "google/gemini-3.1-flash-lite": "gemini-3.1-flash-lite"
 };
 
 const LEGACY_GEMINI_TTS_MODEL_ALIASES: Record<string, string> = {
@@ -44,7 +55,8 @@ function stripProviderPrefix(model: string): string {
 
 export function normalizeGeminiScriptModel(model: string): string {
   const cleaned = stripProviderPrefix(model);
-  return LEGACY_GEMINI_SCRIPT_MODEL_ALIASES[cleaned] ?? cleaned;
+  const resolved = LEGACY_GEMINI_SCRIPT_MODEL_ALIASES[cleaned] ?? cleaned;
+  return SUPPORTED_GEMINI_SCRIPT_MODELS.has(resolved) ? resolved : DEFAULT_GEMINI_SCRIPT_MODEL;
 }
 
 export function normalizeGeminiTtsModel(model: string): string {

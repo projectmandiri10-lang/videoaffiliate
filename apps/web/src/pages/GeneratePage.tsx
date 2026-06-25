@@ -1,25 +1,32 @@
+import {
+  DEFAULT_YOUTUBE_TTS_GENDER,
+  FEATURED_YOUTUBE_TTS_OPTIONS,
+  findTtsVoiceByName,
+  getFeaturedYoutubeTtsOption
+} from "@app/core";
 import { useState, type DragEvent, type FormEvent } from "react";
-import { createJob } from "../api";
+import { createJob, updateSettings } from "../api";
 import type { JobCreationTransition } from "../job-creation";
+import { usePipelineState } from "../lib/use-pipeline-state";
 
 const HOMEPAGE_GUIDES = [
   {
-    label: "Cocok untuk",
-    title: "Affiliate Shopee ke YouTube Shorts",
+    label: "Langkah 1",
+    title: "Upload video produk",
     description:
-      "Aplikasi ini dirancang untuk video produk Shopee yang ingin diubah menjadi Shorts dengan voice over jualan yang lebih rapi, cepat, dan fokus ke klik affiliate."
+      "Masukkan satu video singkat produk. Cocok untuk konten affiliate yang ingin dibuat lebih cepat."
   },
   {
-    label: "Cara kerja",
-    title: "6 frame dianalisis, 3 clip disiapkan",
+    label: "Langkah 2",
+    title: "Pilih potongan terbaik",
     description:
-      "Browser mengambil 6 frame penting untuk Gemini, lalu menyusun 3 kandidat clip dengan hook paling cepat. Anda tinggal pilih yang paling kuat."
+      "Sistem menyiapkan beberapa pilihan potongan video agar Anda tinggal pilih yang paling menarik."
   },
   {
-    label: "Hasil akhir",
-    title: "MP4, subtitle, caption, dan CTA",
+    label: "Langkah 3",
+    title: "Download hasil jadi",
     description:
-      "Output akhir sudah diarahkan untuk YouTube Shorts: voice over singkat, CTA kuat, caption SEO-friendly, dan file siap download tanpa server render."
+      "Setelah selesai, hasil video, subtitle, dan caption bisa langsung diunduh dari browser."
   }
 ] as const;
 
@@ -28,6 +35,7 @@ interface GeneratePageProps {
 }
 
 export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
+  const { settings } = usePipelineState();
   const [video, setVideo] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -35,8 +43,16 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [voiceError, setVoiceError] = useState("");
+  const [voiceLoading, setVoiceLoading] = useState<"female" | "male" | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+
+  const youtubePlatform = settings.platforms.find((platform) => platform.platformId === "youtube");
+  const activeVoiceName =
+    youtubePlatform?.voiceName ||
+    getFeaturedYoutubeTtsOption(DEFAULT_YOUTUBE_TTS_GENDER).voiceName;
+  const activeVoice = findTtsVoiceByName(activeVoiceName);
 
   const resetForm = () => {
     setVideo(null);
@@ -44,6 +60,29 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
     setDescription("");
     setAffiliateLink("");
     setFileInputKey((current) => current + 1);
+  };
+
+  const handleVoiceChoice = async (gender: "female" | "male") => {
+    const featuredVoice = getFeaturedYoutubeTtsOption(gender);
+    if (!youtubePlatform || youtubePlatform.voiceName === featuredVoice.voiceName) {
+      return;
+    }
+    setVoiceError("");
+    setVoiceLoading(gender);
+    try {
+      await updateSettings({
+        ...settings,
+        platforms: settings.platforms.map((platform) =>
+          platform.platformId === "youtube"
+            ? { ...platform, voiceName: featuredVoice.voiceName }
+            : platform
+        )
+      });
+    } catch (voiceUpdateError) {
+      setVoiceError((voiceUpdateError as Error).message);
+    } finally {
+      setVoiceLoading(null);
+    }
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -130,32 +169,31 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
           <span>Analyze</span>
         </div>
         <div className="generate-page__hero-copy">
-          <p className="eyebrow">Shopee Affiliate For YouTube Shorts</p>
-          <h2>Buat voice over video affiliate Shopee yang lebih siap upload ke YouTube Shorts.</h2>
+          <p className="eyebrow">Simple Workflow</p>
+          <h2>Upload video, pilih hasil terbaik, lalu unduh videonya.</h2>
           <p className="page-intro">
-            Halaman ini khusus untuk kreator yang ambil video produk Shopee lalu ingin
-            mengubahnya menjadi konten YouTube Shorts dengan hook cepat, CTA jelas, dan
-            caption yang lebih mudah dipakai untuk promosi affiliate.
+            Tampilan ini dibuat sederhana agar mudah dipakai. Anda cukup menyiapkan video
+            produk, isi informasi singkat, lalu tunggu hasil suara dan subtitle selesai dibuat.
           </p>
         </div>
         <div className="hero-badge-grid">
           <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Output</span>
-            <strong>3 kandidat clip</strong>
+            <span className="hero-badge-card__label">Video</span>
+            <strong>1 video per proses</strong>
           </div>
           <div className="hero-badge-card">
             <span className="hero-badge-card__label">Durasi</span>
-            <strong>18-30 detik</strong>
+            <strong>Maksimal 30 detik</strong>
           </div>
           <div className="hero-badge-card">
-            <span className="hero-badge-card__label">Gemini</span>
-            <strong>6 frame analisis</strong>
+            <span className="hero-badge-card__label">Hasil</span>
+            <strong>Video + subtitle + caption</strong>
           </div>
         </div>
         <div className="hero-pills">
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--cyan" />
-            Audio source dimute
+            Cocok untuk affiliate video pendek
           </div>
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--violet" />
@@ -203,11 +241,54 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
                 <span>
                   {video
                     ? "File siap dianalisis. Klik area ini untuk mengganti file."
-                    : "Upload MP4/MOV lokal maksimal 30 detik. Video tetap diproses di perangkat Anda."}
+                    : "Upload MP4 atau MOV maksimal 30 detik."}
                 </span>
               </span>
             </span>
           </label>
+
+          <div className="voice-choice-panel" aria-label="Pilihan suara narator">
+            <div className="voice-choice-panel__head">
+              <span className="field-kicker">Suara Narator</span>
+              <p className="small">
+                Pilih suara Google TTS yang paling natural untuk narasi Bahasa Indonesia.
+              </p>
+            </div>
+
+            <div className="voice-choice-grid">
+              {FEATURED_YOUTUBE_TTS_OPTIONS.map((option) => {
+                const isSelected = activeVoiceName === option.voiceName;
+                return (
+                  <button
+                    key={option.voiceName}
+                    type="button"
+                    className={`voice-choice-card ${isSelected ? "is-selected" : ""}`}
+                    onClick={() => void handleVoiceChoice(option.gender)}
+                    disabled={loading || voiceLoading !== null}
+                    aria-pressed={isSelected}
+                  >
+                    <span className="voice-choice-card__kicker">{option.title}</span>
+                    <strong>{option.voiceName}</strong>
+                    <span className="voice-choice-card__tone">{option.tone}</span>
+                    <span className="voice-choice-card__description">{option.description}</span>
+                    <span className="voice-choice-card__status">
+                      {voiceLoading === option.gender
+                        ? "Menyimpan pilihan..."
+                        : isSelected
+                          ? "Sedang dipakai"
+                          : "Pilih suara ini"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="small">
+              Aktif sekarang: <strong>{activeVoiceName}</strong>
+              {activeVoice ? ` · ${activeVoice.tone}` : ""}. Pilihan ini disimpan di browser ini.
+            </p>
+            {voiceError && <p className="err-text">{voiceError}</p>}
+          </div>
 
           <label className="form-field">
             <span className="field-kicker">Judul Produk</span>
@@ -228,7 +309,7 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               disabled={loading}
-              placeholder="Jelaskan fitur, manfaat, dan konteks isi video agar AI lebih akurat."
+              placeholder="Tulis poin penting produk secara singkat."
             />
           </label>
 
@@ -245,7 +326,7 @@ export function GeneratePage({ onSubmissionStateChange }: GeneratePageProps) {
 
           <button type="submit" className="primary-button" disabled={loading}>
             <i className="ti ti-bolt" aria-hidden="true" />
-            <span>{loading ? "Menganalisis..." : "Analisis Video & Buat Kandidat Clip"}</span>
+            <span>{loading ? "Memproses..." : "Buat Hasil Video"}</span>
           </button>
         </form>
 

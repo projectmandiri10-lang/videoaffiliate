@@ -7,11 +7,11 @@ import {
   selectClip,
   shareArtifactFile
 } from "../api";
+import { StatusBadge } from "../components/StatusBadge";
+import type { JobCreationTransition } from "../job-creation";
 import { useArtifactUrl } from "../lib/use-artifact-url";
 import { usePipelineState } from "../lib/use-pipeline-state";
 import type { ClipCandidate, FinalRenderStatus, JobRecord, LocalArtifactRef } from "../types";
-import { StatusBadge } from "../components/StatusBadge";
-import type { JobCreationTransition } from "../job-creation";
 
 interface JobsPageProps {
   jobCreationState?: JobCreationTransition | null;
@@ -56,6 +56,10 @@ function renderBadgeClass(status?: FinalRenderStatus): string {
 
 function clipCardLabel(candidate: ClipCandidate): string {
   return `${formatTime(candidate.startSec)} - ${formatTime(candidate.endSec)}`;
+}
+
+function formatDeviceMode(mode?: JobRecord["runtime"]["deviceMode"]): string {
+  return mode === "mobile_restricted" ? "Hemat mobile" : "Desktop";
 }
 
 function ArtifactVideo({ artifact, label }: { artifact?: LocalArtifactRef; label: string }) {
@@ -113,7 +117,7 @@ export function JobsPage({
       return;
     }
     if (jobCreationState.phase === "created" && jobCreationState.jobId) {
-      setMessage(`Job ${jobCreationState.jobId} masuk antrean analisis lokal.`);
+      setMessage(`Job ${jobCreationState.jobId} sedang diproses.`);
       setError("");
       setSelectedJobId(jobCreationState.jobId);
       onJobCreationStateHandled?.(jobCreationState.requestId);
@@ -131,7 +135,7 @@ export function JobsPage({
       setError("");
       setMessage("");
       await selectClip(jobId, clipId);
-      setMessage("Kandidat clip dipilih. Render final sedang diproses di browser.");
+      setMessage("Pilihan video disimpan. Hasil akhir sedang dibuat.");
     } catch (selectError) {
       setError((selectError as Error).message);
     } finally {
@@ -145,7 +149,7 @@ export function JobsPage({
       setError("");
       setMessage("");
       await reanalyzeJob(jobId);
-      setMessage("Analisis ulang dijadwalkan dan akan diproses langsung di browser.");
+      setMessage("Video dijadwalkan untuk diproses ulang.");
     } catch (reanalyzeError) {
       setError((reanalyzeError as Error).message);
     } finally {
@@ -155,7 +159,7 @@ export function JobsPage({
 
   const onReplaceSource = async (jobId: string) => {
     if (!sourceVideo) {
-      setError("Pilih video source baru dulu.");
+      setError("Pilih video baru terlebih dulu.");
       return;
     }
 
@@ -165,7 +169,7 @@ export function JobsPage({
       setMessage("");
       await replaceJobSource(jobId, sourceVideo);
       setSourceVideo(null);
-      setMessage("Source baru tersimpan dan analisis ulang langsung dijadwalkan.");
+      setMessage("Video baru tersimpan dan langsung diproses ulang.");
     } catch (replaceError) {
       setError((replaceError as Error).message);
     } finally {
@@ -179,7 +183,7 @@ export function JobsPage({
       setError("");
       setMessage("");
       await deleteJob(jobId);
-      setMessage("Job berhasil dihapus dari browser.");
+      setMessage("Video berhasil dihapus.");
     } catch (deleteError) {
       setError((deleteError as Error).message);
     } finally {
@@ -200,7 +204,7 @@ export function JobsPage({
     }
     try {
       await navigator.clipboard.writeText(caption);
-      setCopyInfo("Caption final berhasil disalin.");
+      setCopyInfo("Caption berhasil disalin.");
       setTimeout(() => setCopyInfo(""), 2000);
     } catch (copyError) {
       setError((copyError as Error).message);
@@ -214,7 +218,7 @@ export function JobsPage({
     try {
       const shared = await shareArtifactFile(selected.finalRender.mp4Path);
       if (!shared) {
-        setMessage("Browser ini belum mendukung share file. Gunakan tombol download.");
+        setMessage("Browser ini belum mendukung berbagi file. Gunakan download.");
       }
     } catch (shareError) {
       setError((shareError as Error).message);
@@ -228,22 +232,22 @@ export function JobsPage({
           <div>
             <div className="page-kicker">
               <i className="ti ti-stack-2" />
-              <span>Pipeline</span>
+              <span>Proses</span>
             </div>
-            <p className="eyebrow">Jobs</p>
-            <h2>Analisis dan hasil render browser-local</h2>
+            <p className="eyebrow">Hasil Video</p>
+            <h2>Daftar video yang sedang diproses</h2>
             <p className="page-intro">
-              Semua kandidat clip dan output final tersimpan di browser. Tab harus tetap terbuka saat proses analisis atau render sedang berjalan.
+              Semua hasil tersimpan di browser ini. Jangan tutup tab saat proses masih berjalan.
             </p>
           </div>
           <div className="meta-grid">
             <div className="meta-card">
-              <strong>Total Job</strong>
+              <strong>Total Video</strong>
               <div>{jobs.length}</div>
             </div>
             <div className="meta-card">
-              <strong>Storage</strong>
-              <div>IndexedDB + OPFS</div>
+              <strong>Penyimpanan</strong>
+              <div>Browser ini</div>
             </div>
           </div>
         </div>
@@ -252,7 +256,7 @@ export function JobsPage({
           {jobCreationState?.phase === "uploading" && (
             <div className="job-item active">
               <div className="job-item__row">
-                <strong>Mengirim job baru</strong>
+                <strong>Mengirim video baru</strong>
                 <span className="small">{jobCreationState.title}</span>
               </div>
               <div
@@ -277,7 +281,7 @@ export function JobsPage({
                 <StatusBadge status={job.overallStatus} />
               </div>
               <div className="job-item__meta">
-                <span>{job.clipCandidates?.length ?? 0} clip</span>
+                <span>{job.clipCandidates?.length ?? 0} pilihan</span>
                 <span>{job.videoDurationSec.toFixed(1)} detik</span>
               </div>
             </button>
@@ -286,7 +290,7 @@ export function JobsPage({
           {!jobs.length && jobCreationState?.phase !== "uploading" && (
             <div className="empty-state">
               <i className="ti ti-database-off" aria-hidden="true" />
-              <p>Belum ada job untuk ditampilkan.</p>
+              <p>Belum ada video untuk ditampilkan.</p>
             </div>
           )}
         </div>
@@ -302,20 +306,20 @@ export function JobsPage({
                   <div className="break-anywhere">{selected.title}</div>
                 </div>
                 <div className="meta-card">
-                  <strong>Analisis</strong>
+                  <strong>Status awal</strong>
                   <span className={analysisBadgeClass(selected.analysisStatus)}>
                     {selected.analysisStatus ?? "pending"}
                   </span>
                 </div>
                 <div className="meta-card">
-                  <strong>Render</strong>
+                  <strong>Hasil video</strong>
                   <span className={renderBadgeClass(selected.finalRender?.status)}>
                     {selected.finalRender?.status ?? "idle"}
                   </span>
                 </div>
                 <div className="meta-card">
-                  <strong>Device Mode</strong>
-                  <div>{selected.runtime.deviceMode}</div>
+                  <strong>Mode</strong>
+                  <div>{formatDeviceMode(selected.runtime?.deviceMode)}</div>
                 </div>
               </div>
 
@@ -325,7 +329,7 @@ export function JobsPage({
                   <span className="break-anywhere">{selected.affiliateLink}</span>
                 </div>
                 <div className="detail-summary__copy">
-                  <strong>Status Browser</strong>
+                  <strong>Status proses</strong>
                   <span className="break-anywhere">{selected.runtime.statusMessage}</span>
                 </div>
               </div>
@@ -352,7 +356,7 @@ export function JobsPage({
                   onClick={() => void onReanalyze(selected.jobId)}
                   disabled={actionKey === `reanalyze:${selected.jobId}`}
                 >
-                  {actionKey === `reanalyze:${selected.jobId}` ? "Menjadwalkan..." : "Analisis Ulang"}
+                  {actionKey === `reanalyze:${selected.jobId}` ? "Menjadwalkan..." : "Proses Ulang"}
                 </button>
                 <button
                   type="button"
@@ -360,7 +364,7 @@ export function JobsPage({
                   onClick={() => void onDelete(selected.jobId)}
                   disabled={actionKey === `delete:${selected.jobId}`}
                 >
-                  {actionKey === `delete:${selected.jobId}` ? "Menghapus..." : "Hapus Job"}
+                  {actionKey === `delete:${selected.jobId}` ? "Menghapus..." : "Hapus Video"}
                 </button>
               </div>
             </div>
@@ -368,11 +372,11 @@ export function JobsPage({
             <div className="section-card glass-panel">
               <div className="row-head">
                 <div>
-                  <p className="eyebrow">Clip Candidates</p>
-                  <h3>3 kandidat clip untuk YouTube Shorts</h3>
+                  <p className="eyebrow">Pilihan Potongan</p>
+                  <h3>Pilih potongan video terbaik</h3>
                 </div>
                 {selected.selectedClipId && (
-                  <div className="small">Clip aktif: {selected.selectedClipId}</div>
+                  <div className="small">Pilihan aktif: {selected.selectedClipId}</div>
                 )}
               </div>
 
@@ -391,7 +395,7 @@ export function JobsPage({
                       <div>
                         <h4>{candidate.clipId}</h4>
                         <div className="small">
-                          {clipCardLabel(candidate)} · {candidate.durationSec.toFixed(1)} detik
+                          {clipCardLabel(candidate)} - {candidate.durationSec.toFixed(1)} detik
                         </div>
                         <div className="small">Skor {candidate.score.toFixed(1)}</div>
                       </div>
@@ -405,7 +409,7 @@ export function JobsPage({
                           selected.analysisStatus === "running"
                         }
                       >
-                        {actionKey === `select:${candidate.clipId}` ? "Menjadwalkan..." : "Pilih & Render"}
+                        {actionKey === `select:${candidate.clipId}` ? "Menyiapkan..." : "Pilih Hasil Ini"}
                       </button>
                     </div>
 
@@ -424,7 +428,7 @@ export function JobsPage({
                       />
                     </div>
                     <p className="small">
-                      Browser sedang mengekstrak frame, Gemini menilai kandidat via Cloudflare proxy, lalu preview dibuat lokal.
+                      Sistem sedang menilai video dan menyiapkan pilihan potongan terbaik.
                     </p>
                   </div>
                 )}
@@ -432,7 +436,7 @@ export function JobsPage({
                 {selected.analysisStatus !== "running" && !(selected.clipCandidates?.length) && (
                   <div className="empty-state">
                     <i className="ti ti-movie-off" aria-hidden="true" />
-                    <p>Belum ada kandidat clip untuk job ini.</p>
+                    <p>Belum ada pilihan potongan untuk video ini.</p>
                   </div>
                 )}
               </div>
@@ -441,8 +445,8 @@ export function JobsPage({
             <div className="section-card glass-panel">
               <div className="row-head">
                 <div>
-                  <p className="eyebrow">Final Render</p>
-                  <h3>Output YouTube Shorts</h3>
+                  <p className="eyebrow">Hasil Akhir</p>
+                  <h3>Video siap diunduh</h3>
                 </div>
                 <span className={renderBadgeClass(selected.finalRender?.status)}>
                   {selected.finalRender?.status ?? "idle"}
@@ -480,7 +484,7 @@ export function JobsPage({
                       Download Caption
                     </button>
                     <button type="button" className="secondary-button" onClick={() => void onShare()}>
-                      Share File
+                      Bagikan
                     </button>
                   </div>
 
@@ -503,21 +507,19 @@ export function JobsPage({
                 </div>
               ) : selected.finalRender?.status === "running" || selected.finalRender?.status === "pending" ? (
                 <div className="progress-panel">
-                  <strong>Render final sedang diproses</strong>
+                  <strong>Video akhir sedang dibuat</strong>
                   <div className="job-progress-track">
                     <div
                       className="job-progress-fill"
                       style={{ width: `${Math.max(6, Math.round(selected.runtime.progress * 100))}%` }}
                     />
                   </div>
-                  <p className="small">
-                    Browser sedang merender clip final, burn-in subtitle, dan menggabungkan voice over Gemini.
-                  </p>
+                  <p className="small">Sistem sedang menyusun video, suara, dan subtitle.</p>
                 </div>
               ) : (
                 <div className="empty-state">
                   <i className="ti ti-video-off" aria-hidden="true" />
-                  <p>Pilih salah satu kandidat clip untuk memulai render final.</p>
+                  <p>Pilih salah satu potongan video untuk membuat hasil akhir.</p>
                 </div>
               )}
             </div>
@@ -525,15 +527,15 @@ export function JobsPage({
             <div className="section-card glass-panel">
               <div className="row-head">
                 <div>
-                  <p className="eyebrow">Source</p>
-                  <h3>Ganti source video</h3>
+                  <p className="eyebrow">Video Sumber</p>
+                  <h3>Ganti video</h3>
                 </div>
               </div>
               <div className="grid-form">
                 <label className="form-field">
-                  <span className="field-kicker">Video Source Baru</span>
+                  <span className="field-kicker">Video Baru</span>
                   <input
-                    aria-label="Video Source Baru"
+                    aria-label="Video Baru"
                     type="file"
                     accept="video/*"
                     onChange={(event) => setSourceVideo(event.target.files?.[0] ?? null)}
@@ -545,7 +547,7 @@ export function JobsPage({
                   onClick={() => void onReplaceSource(selected.jobId)}
                   disabled={actionKey === `source:${selected.jobId}`}
                 >
-                  {actionKey === `source:${selected.jobId}` ? "Mengganti..." : "Simpan Source Baru"}
+                  {actionKey === `source:${selected.jobId}` ? "Mengganti..." : "Ganti Video"}
                 </button>
               </div>
             </div>
@@ -554,7 +556,7 @@ export function JobsPage({
           <div className="detail-box glass-panel">
             <div className="empty-state">
               <i className="ti ti-database-off" aria-hidden="true" />
-              <p>Belum ada job aktif untuk ditampilkan.</p>
+              <p>Belum ada video aktif untuk ditampilkan.</p>
             </div>
           </div>
         )}

@@ -2,15 +2,13 @@ import { useState } from "react";
 import type { JobCreationTransition } from "./job-creation";
 import { GeneratePage } from "./pages/GeneratePage";
 import { JobsPage } from "./pages/JobsPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { TutorialPage } from "./pages/TutorialPage";
 
-type TabId = "generate" | "jobs" | "settings" | "tutorial";
+type TabId = "generate" | "jobs" | "tutorial";
 
 const TAB_LABEL: Record<TabId, string> = {
-  generate: "Analyze",
-  jobs: "Jobs",
-  settings: "Settings",
+  generate: "Buat Video",
+  jobs: "Hasil",
   tutorial: "Tutorial"
 };
 
@@ -43,13 +41,11 @@ export default function App() {
               <i className="ti ti-atom-2" />
             </div>
             <div>
-              <p className="eyebrow">Clippers Workflow</p>
-              <h1>PENGISI SUARA VIDEOSHORT YOUTUBE</h1>
+              <p className="eyebrow">Video Affiliate</p>
+              <h1>Pembuat suara video affiliate</h1>
               <p className="app-brand__copy">
-                Untuk video affiliate Shopee yang ingin diposting ke YouTube Shorts:
-                upload video produk maksimal 30 detik, analisis 6 frame penting langsung
-                di browser, lalu render voice over dengan hook, CTA, dan caption yang
-                lebih siap promosi.
+                Upload video produk singkat, pilih potongan terbaik, lalu download hasil
+                video dengan suara, subtitle, dan caption yang siap dipakai.
               </p>
             </div>
           </div>
@@ -83,20 +79,19 @@ export default function App() {
               onJobCreationStateHandled={handleSubmissionStateHandled}
             />
           )}
-          {tab === "settings" && <SettingsPage />}
           {tab === "tutorial" && <TutorialPage />}
         </section>
 
         <footer className="app-footer">
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--cyan" />
-            3 kandidat clip
+            Maksimal 30 detik
           </div>
           <div className="footer-pill">
             <span className="footer-pill__dot footer-pill__dot--violet" />
-            Browser-local render
+            3 pilihan potongan
           </div>
-          <div className="footer-pill">Cloudflare proxy + OPFS</div>
+          <div className="footer-pill">Hasil tersimpan di browser ini</div>
         </footer>
       </div>
     </main>

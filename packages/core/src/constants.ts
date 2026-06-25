@@ -60,6 +60,33 @@ export const GEMINI_TTS_VOICES: TtsVoiceOption[] = [
   { voiceName: "Sulafat", label: "Sulafat", tone: "Warm", gender: "female" }
 ];
 
+export const DEFAULT_YOUTUBE_TTS_GENDER = "female";
+
+export const FEATURED_YOUTUBE_TTS_OPTIONS = [
+  {
+    gender: "female" as const,
+    voiceName: "Despina",
+    title: "Wanita realistis",
+    tone: "Smooth",
+    description: "Natural, halus, dan aman untuk narasi affiliate Bahasa Indonesia."
+  },
+  {
+    gender: "male" as const,
+    voiceName: "Iapetus",
+    title: "Pria realistis",
+    tone: "Clear",
+    description: "Jernih, tegas, dan tetap enak didengar untuk penjelasan produk singkat."
+  }
+] as const;
+
+export function getFeaturedYoutubeTtsOption(gender: "female" | "male") {
+  return FEATURED_YOUTUBE_TTS_OPTIONS.find((option) => option.gender === gender)!;
+}
+
+export function findFeaturedYoutubeTtsOption(voiceName: string) {
+  return FEATURED_YOUTUBE_TTS_OPTIONS.find((option) => option.voiceName === voiceName);
+}
+
 export const GEMINI_EXCITED_PRESETS: ExcitedVoicePreset[] = [
   {
     presetId: "female_excited_v1",

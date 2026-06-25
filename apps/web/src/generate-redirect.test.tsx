@@ -9,7 +9,8 @@ vi.mock("./api", async () => {
   return {
     ...actual,
     createJob: vi.fn(),
-    fetchSettings: vi.fn()
+    fetchSettings: vi.fn(),
+    updateSettings: vi.fn()
   };
 });
 
@@ -24,7 +25,7 @@ describe("generate redirect", () => {
       initialized: true,
       jobs: [],
       settings: {
-        scriptModel: "gemini-2.5-pro",
+        scriptModel: "gemini-3.5-flash",
         ttsModel: "gemini-2.5-flash-preview-tts",
         language: "id-ID",
         maxVideoSeconds: 30,
@@ -40,7 +41,7 @@ describe("generate redirect", () => {
         concurrency: 1,
         platforms: [
           { platformId: "tiktok", enabled: true, voiceName: "Leda", speechRate: 1 },
-          { platformId: "youtube", enabled: true, voiceName: "Charon", speechRate: 1 },
+          { platformId: "youtube", enabled: true, voiceName: "Despina", speechRate: 1 },
           { platformId: "facebook", enabled: true, voiceName: "Aoede", speechRate: 1 },
           { platformId: "shopee", enabled: true, voiceName: "Kore", speechRate: 1 }
         ]
@@ -48,7 +49,7 @@ describe("generate redirect", () => {
       voices: []
     });
     vi.mocked(api.fetchSettings).mockResolvedValue({
-      scriptModel: "gemini-2.5-pro",
+      scriptModel: "gemini-3.5-flash",
       ttsModel: "gemini-2.5-flash-preview-tts",
       language: "id-ID",
       maxVideoSeconds: 30,
@@ -64,7 +65,7 @@ describe("generate redirect", () => {
       concurrency: 1,
       platforms: [
         { platformId: "tiktok", enabled: true, voiceName: "Leda", speechRate: 1 },
-        { platformId: "youtube", enabled: true, voiceName: "Charon", speechRate: 1 },
+        { platformId: "youtube", enabled: true, voiceName: "Despina", speechRate: 1 },
         { platformId: "facebook", enabled: true, voiceName: "Aoede", speechRate: 1 },
         { platformId: "shopee", enabled: true, voiceName: "Kore", speechRate: 1 }
       ]
@@ -91,9 +92,9 @@ describe("generate redirect", () => {
       target: { value: "https://contoh.test/affiliate" }
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /analisis video & buat kandidat clip/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buat hasil video/i }));
 
-    expect(await screen.findByText(/mengirim job baru/i)).toBeTruthy();
+    expect(await screen.findByText(/mengirim video baru/i)).toBeTruthy();
     expect(
       screen.getByRole("progressbar", {
         name: /upload job promo baru/i

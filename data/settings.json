@@ -1,8 +1,8 @@
 {
-  "scriptModel": "gemini-2.5-pro",
+  "scriptModel": "gemini-3.5-flash",
   "ttsModel": "gemini-2.5-flash-preview-tts",
   "language": "id-ID",
-  "maxVideoSeconds": 60,
+  "maxVideoSeconds": 30,
   "safetyMode": "safe_marketing",
   "ctaPosition": "end",
   "ctaMode": "random",
@@ -23,7 +23,7 @@
     {
       "platformId": "youtube",
       "enabled": true,
-      "voiceName": "Charon",
+      "voiceName": "Despina",
       "speechRate": 1
     },
     {

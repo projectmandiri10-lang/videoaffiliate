@@ -11,11 +11,17 @@ export function useArtifactUrl(artifact?: LocalArtifactRef) {
       setUrl(undefined);
       return;
     }
-    void toArtifactObjectUrl(artifact).then((nextUrl) => {
-      if (active) {
-        setUrl(nextUrl);
-      }
-    });
+    void toArtifactObjectUrl(artifact)
+      .then((nextUrl) => {
+        if (active) {
+          setUrl(nextUrl);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setUrl(undefined);
+        }
+      });
     return () => {
       active = false;
     };
