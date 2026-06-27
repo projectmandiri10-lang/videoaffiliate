@@ -56,12 +56,26 @@ function stripProviderPrefix(model: string): string {
 export function normalizeGeminiScriptModel(model: string): string {
   const cleaned = stripProviderPrefix(model);
   const resolved = LEGACY_GEMINI_SCRIPT_MODEL_ALIASES[cleaned] ?? cleaned;
-  return SUPPORTED_GEMINI_SCRIPT_MODELS.has(resolved) ? resolved : DEFAULT_GEMINI_SCRIPT_MODEL;
+  if (!resolved) {
+    return DEFAULT_GEMINI_SCRIPT_MODEL;
+  }
+  return SUPPORTED_GEMINI_SCRIPT_MODELS.has(resolved) ? resolved : resolved;
 }
 
 export function normalizeGeminiTtsModel(model: string): string {
   const cleaned = stripProviderPrefix(model);
   return LEGACY_GEMINI_TTS_MODEL_ALIASES[cleaned] ?? cleaned;
+}
+
+export function toLiteLlmGeminiModel(model: string): string {
+  const cleaned = model.trim();
+  if (!cleaned) {
+    return `gemini/${DEFAULT_GEMINI_SCRIPT_MODEL}`;
+  }
+  if (cleaned.includes("/")) {
+    return cleaned;
+  }
+  return `gemini/${cleaned}`;
 }
 
 export function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } {

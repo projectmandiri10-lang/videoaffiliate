@@ -106,11 +106,17 @@ describe("web smoke", () => {
   it("renders the simplified app shell without settings tab", async () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: /pembuat suara video affiliate/i })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: /voice over untuk youtube shorts affiliate video/i })
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Tutorial" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
-    expect(screen.getByText(/upload video, pilih hasil terbaik, lalu unduh videonya/i)).toBeTruthy();
-    expect(screen.getByText(/download hasil jadi/i)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /upload video produk singkat, pilih potongan terbaik, lalu download hasil video/i
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(/hasil tersimpan di browser ini/i)).toBeTruthy();
   });
 
   it("opens the short tutorial page from the highlighted tutorial button", async () => {
@@ -119,7 +125,7 @@ describe("web smoke", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tutorial" }));
 
     expect(await screen.findByRole("heading", { name: /tutorial singkat aplikasi/i })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /analisis 6 frame penting/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /pilih clip terbaik/i })).toBeTruthy();
     expect(screen.getByRole("heading", { name: /download hasil/i })).toBeTruthy();
   });
 

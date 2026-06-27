@@ -6,7 +6,8 @@ import { DEFAULT_PORT } from "./constants.js";
 dotenv.config({ path: path.join(ROOT_DIR, ".env"), override: true });
 
 export interface AppEnv {
-  geminiApiKey: string;
+  litellmApiKey: string;
+  litellmBaseUrl: string;
   port: number;
   webOrigins: string[];
 }
@@ -14,14 +15,40 @@ export interface AppEnv {
 function normalizeApiKey(input: string, envName: string): string {
   const clean = input.trim();
   if (!clean) {
-    throw new Error(`${envName} tidak valid. Isi dengan Gemini API key yang aktif.`);
+    throw new Error(`${envName} tidak valid. Isi dengan LiteLLM API key yang aktif.`);
   }
   return clean;
 }
 
+function normalizeBaseUrl(input: string): string {
+  const clean = input.trim().replace(/\/+$/, "");
+  if (!clean) {
+    throw new Error("LITELLM_BASE_URL tidak valid.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(clean);
+  } catch {
+    throw new Error(
+      "LITELLM_BASE_URL tidak valid. Contoh: http://127.0.0.1:4000 atau https://litellm.example.com"
+    );
+  }
+
+  if (!parsed.pathname || parsed.pathname === "/") {
+    parsed.pathname = "/v1";
+  } else if (!parsed.pathname.endsWith("/v1")) {
+    parsed.pathname = `${parsed.pathname.replace(/\/+$/, "")}/v1`;
+  }
+
+  return parsed.toString().replace(/\/$/, "");
+}
+
 export function loadEnv(): AppEnv {
-  const geminiApiKeyRaw =
-    process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || "";
+  const litellmApiKeyRaw =
+    process.env.LITELLM_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim() || "";
+  const litellmBaseUrlRaw =
+    process.env.LITELLM_BASE_URL?.trim() || process.env.OPENAI_BASE_URL?.trim() || "";
   const portRaw = process.env.PORT?.trim();
   const port = portRaw ? Number(portRaw) : DEFAULT_PORT;
   const webOrigins = (process.env.WEB_ORIGIN?.trim() || "http://localhost:5173")
@@ -29,9 +56,9 @@ export function loadEnv(): AppEnv {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
-  if (!geminiApiKeyRaw) {
+  if (!litellmBaseUrlRaw) {
     throw new Error(
-      "GEMINI_API_KEY tidak ditemukan. Isi Gemini API key langsung dari Google AI Studio atau set GOOGLE_API_KEY."
+      "LITELLM_BASE_URL tidak ditemukan. Arahkan ke endpoint LiteLLM Anda, misalnya http://127.0.0.1:4000."
     );
   }
 
@@ -46,7 +73,10 @@ export function loadEnv(): AppEnv {
   }
 
   return {
-    geminiApiKey: normalizeApiKey(geminiApiKeyRaw, "GEMINI_API_KEY"),
+    litellmApiKey: litellmApiKeyRaw
+      ? normalizeApiKey(litellmApiKeyRaw, "LITELLM_API_KEY")
+      : "litellm-no-auth",
+    litellmBaseUrl: normalizeBaseUrl(litellmBaseUrlRaw),
     port,
     webOrigins
   };

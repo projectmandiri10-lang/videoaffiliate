@@ -4,13 +4,18 @@ import { errorResponse, json } from "../../_lib/response";
 
 export async function onRequestPost(context: {
   request: Request;
-  env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string };
+  env: {
+    LITELLM_API_KEY?: string;
+    LITELLM_BASE_URL?: string;
+    OPENAI_API_KEY?: string;
+    OPENAI_BASE_URL?: string;
+  };
 }) {
   try {
     const body = (await context.request.json()) as GenerateSocialMetadataInput;
     const result = await generateMetadata(context.env, body);
     return json(result);
   } catch (error) {
-    return errorResponse("Gagal membuat caption dan hashtags lewat Gemini proxy.", 500, error);
+    return errorResponse("Gagal membuat caption dan hashtags lewat LiteLLM Gemini proxy.", 500, error);
   }
 }

@@ -21,8 +21,20 @@ async function bootstrap(): Promise<void> {
   await jobsStore.normalizeAll();
   const healedSourceCount = await jobsStore.healSourceVideoPaths();
 
-  const contentService = new GeminiContentService(env.geminiApiKey, logger);
-  const geminiTts = new GeminiTtsService(env.geminiApiKey, logger);
+  const contentService = new GeminiContentService(
+    {
+      apiKey: env.litellmApiKey,
+      baseURL: env.litellmBaseUrl
+    },
+    logger
+  );
+  const geminiTts = new GeminiTtsService(
+    {
+      apiKey: env.litellmApiKey,
+      baseURL: env.litellmBaseUrl
+    },
+    logger
+  );
   const windowsTts = new WindowsTtsService(logger);
   const speechGenerator = new FallbackSpeechGenerator(windowsTts, logger, geminiTts);
   const processor = new JobProcessor(

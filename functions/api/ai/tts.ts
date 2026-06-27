@@ -11,7 +11,12 @@ function encodeBase64(bytes: Uint8Array): string {
 
 export async function onRequestPost(context: {
   request: Request;
-  env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string };
+  env: {
+    LITELLM_API_KEY?: string;
+    LITELLM_BASE_URL?: string;
+    OPENAI_API_KEY?: string;
+    OPENAI_BASE_URL?: string;
+  };
 }) {
   try {
     const body = (await context.request.json()) as {
@@ -26,6 +31,6 @@ export async function onRequestPost(context: {
       audioBase64: encodeBase64(audio.data)
     });
   } catch (error) {
-    return errorResponse("Gagal membuat TTS lewat Gemini proxy.", 500, error);
+    return errorResponse("Gagal membuat TTS lewat LiteLLM Gemini proxy.", 500, error);
   }
 }

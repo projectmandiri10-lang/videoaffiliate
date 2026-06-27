@@ -3,7 +3,12 @@ import { generateScript } from "../../_lib/gemini";
 
 export async function onRequestPost(context: {
   request: Request;
-  env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string };
+  env: {
+    LITELLM_API_KEY?: string;
+    LITELLM_BASE_URL?: string;
+    OPENAI_API_KEY?: string;
+    OPENAI_BASE_URL?: string;
+  };
 }) {
   try {
     const body = (await context.request.json()) as {
@@ -14,6 +19,6 @@ export async function onRequestPost(context: {
     const script = await generateScript(context.env, body);
     return json({ script });
   } catch (error) {
-    return errorResponse("Gagal membuat script lewat Gemini proxy.", 500, error);
+    return errorResponse("Gagal membuat script lewat LiteLLM Gemini proxy.", 500, error);
   }
 }

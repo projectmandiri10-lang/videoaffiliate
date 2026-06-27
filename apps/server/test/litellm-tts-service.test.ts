@@ -7,15 +7,24 @@ import {
 
 describe("GeminiTtsService", () => {
   const logger = pino({ level: "silent" });
-  const generateContent = vi.fn();
-  const service = new GeminiTtsService("gemini-secret", logger, {
-    models: {
-      generateContent
+  const createCompletion = vi.fn();
+  const service = new GeminiTtsService(
+    {
+      apiKey: "litellm-secret",
+      baseURL: "http://127.0.0.1:4000/v1"
+    },
+    logger,
+    {
+      chat: {
+        completions: {
+          create: createCompletion
+        }
+      }
     }
-  });
+  );
 
   beforeEach(() => {
-    generateContent.mockReset();
+    createCompletion.mockReset();
   });
 
   it("maps legacy Gemini TTS model names to direct Gemini model IDs", () => {
@@ -29,18 +38,14 @@ describe("GeminiTtsService", () => {
 
   it("requests Gemini TTS audio with the configured model and voice", async () => {
     const audioBytes = Uint8Array.from(Buffer.from("gemini-audio"));
-    generateContent.mockResolvedValue({
-      candidates: [
+    createCompletion.mockResolvedValue({
+      choices: [
         {
-          content: {
-            parts: [
-              {
-                inlineData: {
-                  data: Buffer.from(audioBytes).toString("base64"),
-                  mimeType: "audio/L16"
-                }
-              }
-            ]
+          message: {
+            audio: {
+              data: Buffer.from(audioBytes).toString("base64"),
+              transcript: "Halo, ini voice over."
+            }
           }
         }
       ]
@@ -55,19 +60,22 @@ describe("GeminiTtsService", () => {
 
     expect(audio.data.toString("utf8")).toBe("gemini-audio");
     expect(audio.mimeType).toBe("audio/pcm");
-    expect(generateContent).toHaveBeenCalledTimes(1);
-    expect(generateContent).toHaveBeenCalledWith({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: "Halo, ini voice over.",
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: "Kore"
-            }
-          }
+    expect(createCompletion).toHaveBeenCalledTimes(1);
+    expect(createCompletion).toHaveBeenCalledWith({
+      model: "gemini/gemini-2.5-flash-preview-tts",
+      messages: [
+        {
+          role: "user",
+          content: "Halo, ini voice over."
         }
+      ],
+      modalities: ["text", "audio"],
+      audio: {
+        voice: "Kore",
+        format: "wav"
+      },
+      extra_body: {
+        allowed_openai_params: ["audio", "modalities"]
       }
     });
   });

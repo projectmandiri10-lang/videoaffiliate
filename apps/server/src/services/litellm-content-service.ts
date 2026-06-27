@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { GoogleGenAI, createPartFromBase64, createPartFromText } from "@google/genai";
+import OpenAI from "openai";
 import type {
   AIService,
   AnalyzeClipCandidatesInput,
@@ -20,13 +20,20 @@ import {
   extractScriptText,
   extractSocialMetadata
 } from "../utils/model-output.js";
-import { parseDataUrl } from "../utils/gemini-models.js";
+import { toLiteLlmGeminiModel } from "../utils/gemini-models.js";
 import { withRetry } from "../utils/retry.js";
 import { buildClipSelectionPrompt, buildReelsMetadataPrompt } from "./prompt-builder.js";
 
-interface GeminiModelsClient {
-  models: {
-    generateContent(input: unknown): Promise<unknown>;
+interface LiteLlmClientConfig {
+  apiKey: string;
+  baseURL: string;
+}
+
+interface LiteLlmChatClient {
+  chat: {
+    completions: {
+      create(input: unknown): Promise<unknown>;
+    };
   };
 }
 
@@ -39,12 +46,19 @@ const TEXT_MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-3-flash-preview"];
 
 function buildContentParts(prompt: string, frames: AnalysisFrame[]) {
   return [
-    createPartFromText(prompt),
+    { type: "text", text: prompt },
     ...frames.flatMap((frame, index) => {
-      const parsed = parseDataUrl(frame.dataUrl);
       return [
-        createPartFromText(`Frame ${index + 1} pada ${frame.timestampSec.toFixed(2)} detik.`),
-        createPartFromBase64(parsed.base64, parsed.mimeType)
+        {
+          type: "text",
+          text: `Frame ${index + 1} pada ${frame.timestampSec.toFixed(2)} detik.`
+        },
+        {
+          type: "image_url",
+          image_url: {
+            url: frame.dataUrl
+          }
+        }
       ];
     })
   ];
@@ -64,18 +78,24 @@ function buildClipCandidateContentParts(input: AnalyzeClipCandidatesInput) {
   });
 
   return [
-    createPartFromText(prompt),
+    { type: "text", text: prompt },
     ...input.candidates.flatMap((candidate) => [
-      createPartFromText(
-        `Kandidat ${candidate.clipId} pada ${candidate.startSec.toFixed(2)}-${candidate.endSec.toFixed(2)} detik.`
-      ),
+      {
+        type: "text",
+        text: `Kandidat ${candidate.clipId} pada ${candidate.startSec.toFixed(2)}-${candidate.endSec.toFixed(2)} detik.`
+      },
       ...candidate.frames.flatMap((frame, index) => {
-        const parsed = parseDataUrl(frame.dataUrl);
         return [
-          createPartFromText(
-            `Frame ${index + 1} kandidat ${candidate.clipId} pada ${frame.timestampSec.toFixed(2)} detik.`
-          ),
-          createPartFromBase64(parsed.base64, parsed.mimeType)
+          {
+            type: "text",
+            text: `Frame ${index + 1} kandidat ${candidate.clipId} pada ${frame.timestampSec.toFixed(2)} detik.`
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: frame.dataUrl
+            }
+          }
         ];
       })
     ])
@@ -83,14 +103,19 @@ function buildClipCandidateContentParts(input: AnalyzeClipCandidatesInput) {
 }
 
 export class GeminiContentService implements AIService {
-  private readonly client: GeminiModelsClient;
+  private readonly client: LiteLlmChatClient;
 
   public constructor(
-    apiKey: string,
+    config: LiteLlmClientConfig,
     private readonly logger: FastifyBaseLogger,
-    client?: GeminiModelsClient
+    client?: LiteLlmChatClient
   ) {
-    this.client = client ?? new GoogleGenAI({ apiKey });
+    this.client =
+      client ??
+      new OpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL
+      });
   }
 
   public async generateScript(input: GenerateScriptInput): Promise<string> {
@@ -102,11 +127,16 @@ export class GeminiContentService implements AIService {
         for (const prompt of prompts) {
           try {
             const response = await this.createContent({
-              model,
-              contents: buildContentParts(
-                `${prompt}\n\nGunakan frame video berikut untuk memahami konteks visual video.`,
-                input.frames
-              )
+              model: toLiteLlmGeminiModel(model),
+              messages: [
+                {
+                  role: "user",
+                  content: buildContentParts(
+                    `${prompt}\n\nGunakan frame video berikut untuk memahami konteks visual video.`,
+                    input.frames
+                  )
+                }
+              ]
             });
             const script = extractScriptText(response);
             if (script) {
@@ -166,10 +196,15 @@ export class GeminiContentService implements AIService {
     for (const model of this.listTextModels(input.model)) {
       try {
         const response = await this.createContent({
-          model,
-          contents: [createPartFromText(prompt)],
-          config: {
-            responseMimeType: "application/json"
+          model: toLiteLlmGeminiModel(model),
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          response_format: {
+            type: "json_object"
           }
         });
 
@@ -206,10 +241,15 @@ export class GeminiContentService implements AIService {
     for (const model of this.listVisionModels(input.model)) {
       try {
         const response = await this.createContent({
-          model,
-          contents: buildClipCandidateContentParts(input),
-          config: {
-            responseMimeType: "application/json"
+          model: toLiteLlmGeminiModel(model),
+          messages: [
+            {
+              role: "user",
+              content: buildClipCandidateContentParts(input)
+            }
+          ],
+          response_format: {
+            type: "json_object"
           }
         });
         const parsed = extractClipCandidateScores(response);
@@ -259,8 +299,13 @@ export class GeminiContentService implements AIService {
       for (const prompt of prompts) {
         try {
           const response = await this.createContent({
-            model,
-            contents: [createPartFromText(prompt)]
+            model: toLiteLlmGeminiModel(model),
+            messages: [
+              {
+                role: "user",
+                content: prompt
+              }
+            ]
           });
           const script = extractScriptText(response);
           if (!script) {
@@ -315,7 +360,7 @@ export class GeminiContentService implements AIService {
   }
 
   private async createContent(input: Record<string, unknown>): Promise<unknown> {
-    return withRetry(() => this.client.models.generateContent(input), {
+    return withRetry(() => this.client.chat.completions.create(input), {
       attempts: 3,
       baseDelayMs: 700,
       shouldRetry: isTransientLlmError,

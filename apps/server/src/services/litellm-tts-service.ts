@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import type { GenerateSpeechInput, SpeechGenerator } from "../types.js";
 import {
   extractErrorMessage,
@@ -10,13 +10,21 @@ import {
 import { extractAudioFromResponse } from "../utils/model-output.js";
 import {
   DEFAULT_GEMINI_TTS_MODEL,
-  normalizeGeminiTtsModel
+  normalizeGeminiTtsModel,
+  toLiteLlmGeminiModel
 } from "../utils/gemini-models.js";
 import { withRetry } from "../utils/retry.js";
 
-interface GeminiAudioClient {
-  models: {
-    generateContent(input: unknown): Promise<unknown>;
+interface LiteLlmClientConfig {
+  apiKey: string;
+  baseURL: string;
+}
+
+interface LiteLlmAudioClient {
+  chat: {
+    completions: {
+      create(input: unknown): Promise<unknown>;
+    };
   };
 }
 
@@ -41,14 +49,19 @@ function buildGeminiTtsTranscript(input: GenerateSpeechInput): string {
 }
 
 export class GeminiTtsService implements SpeechGenerator {
-  private readonly client: GeminiAudioClient;
+  private readonly client: LiteLlmAudioClient;
 
   public constructor(
-    apiKey: string,
+    config: LiteLlmClientConfig,
     private readonly logger: FastifyBaseLogger,
-    client?: GeminiAudioClient
+    client?: LiteLlmAudioClient
   ) {
-    this.client = client ?? new GoogleGenAI({ apiKey });
+    this.client =
+      client ??
+      new OpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL
+      });
   }
 
   public async generateSpeech(
@@ -61,18 +74,21 @@ export class GeminiTtsService implements SpeechGenerator {
       try {
         const response = await withRetry(
           () =>
-            this.client.models.generateContent({
-              model,
-              contents: buildGeminiTtsTranscript(input),
-              config: {
-                responseModalities: ["AUDIO"],
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: {
-                      voiceName: input.voiceName
-                    }
-                  }
+            this.client.chat.completions.create({
+              model: toLiteLlmGeminiModel(model),
+              messages: [
+                {
+                  role: "user",
+                  content: buildGeminiTtsTranscript(input)
                 }
+              ],
+              modalities: ["text", "audio"],
+              audio: {
+                voice: input.voiceName,
+                format: "wav"
+              },
+              extra_body: {
+                allowed_openai_params: ["audio", "modalities"]
               }
             }),
           {

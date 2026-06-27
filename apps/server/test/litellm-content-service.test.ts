@@ -4,18 +4,27 @@ import { GeminiContentService } from "../src/services/litellm-content-service.js
 
 describe("GeminiContentService", () => {
   const logger = pino({ level: "silent" });
-  const chatCreate = vi.fn();
+  const createCompletion = vi.fn();
   const frameDataUrl = `data:image/jpeg;base64,${Buffer.from("frame-01").toString("base64")}`;
 
-  const service = new GeminiContentService("gemini-secret", logger, {
-    models: {
-      generateContent: chatCreate
+  const service = new GeminiContentService(
+    {
+      apiKey: "litellm-secret",
+      baseURL: "http://127.0.0.1:4000/v1"
+    },
+    logger,
+    {
+      chat: {
+        completions: {
+          create: createCompletion
+        }
+      }
     }
-  });
+  );
 
   it("sends multimodal frames for script generation", async () => {
-    chatCreate.mockReset();
-    chatCreate.mockResolvedValue({ text: "Naskah Gemini final." });
+    createCompletion.mockReset();
+    createCompletion.mockResolvedValue({ text: "Naskah Gemini final." });
 
     const script = await service.generateScript({
       model: "gemini-2.5-pro",
@@ -29,24 +38,31 @@ describe("GeminiContentService", () => {
     });
 
     expect(script).toBe("Naskah Gemini final.");
-    expect(chatCreate).toHaveBeenCalledTimes(1);
-    const firstCall = chatCreate.mock.calls[0]?.[0] as {
+    expect(createCompletion).toHaveBeenCalledTimes(1);
+    const firstCall = createCompletion.mock.calls[0]?.[0] as {
       model?: string;
-      contents?: Array<{ text?: string; inlineData?: { mimeType?: string } }>;
+      messages?: Array<{
+        content?: Array<{
+          type?: string;
+          text?: string;
+          image_url?: { url?: string };
+        }>;
+      }>;
     };
     expect(firstCall).toMatchObject({
-      model: "gemini-2.5-pro"
+      model: "gemini/gemini-2.5-pro"
     });
-    expect(firstCall.contents?.[0]?.text).toContain("Analisis video ini");
-    expect(firstCall.contents?.some((part) => part.text?.includes("Frame 1 pada 2.70 detik."))).toBe(true);
+    const content = firstCall.messages?.[0]?.content ?? [];
+    expect(content[0]?.text).toContain("Analisis video ini");
+    expect(content.some((part) => part.text?.includes("Frame 1 pada 2.70 detik."))).toBe(true);
     expect(
-      firstCall.contents?.some((part) => part.inlineData?.mimeType === "image/jpeg")
+      content.some((part) => part.image_url?.url === frameDataUrl)
     ).toBe(true);
   });
 
   it("falls back to another vision model before text-only", async () => {
-    chatCreate.mockReset();
-    chatCreate
+    createCompletion.mockReset();
+    createCompletion
       .mockRejectedValueOnce({
         status: 404,
         message: "404 model not found"
@@ -70,18 +86,19 @@ describe("GeminiContentService", () => {
 
     expect(script).toBe("Naskah fallback vision.");
     expect(
-      chatCreate.mock.calls.some(
-        (call) => (call[0] as { model?: string })?.model === "gemini-3.1-flash-image-preview"
+      createCompletion.mock.calls.some(
+        (call) =>
+          (call[0] as { model?: string })?.model === "gemini/gemini-3.1-flash-image-preview"
       )
     ).toBe(true);
-    expect(chatCreate.mock.calls[2]?.[0]).toMatchObject({
-      model: "gemini-3.1-flash-image-preview"
+    expect(createCompletion.mock.calls[2]?.[0]).toMatchObject({
+      model: "gemini/gemini-3.1-flash-image-preview"
     });
   });
 
   it("falls back to text-only when vision models fail", async () => {
-    chatCreate.mockReset();
-    chatCreate
+    createCompletion.mockReset();
+    createCompletion
       .mockRejectedValueOnce({
         status: 400,
         message: "Provided image is not valid."
@@ -112,15 +129,20 @@ describe("GeminiContentService", () => {
     });
 
     expect(script).toBe("Naskah fallback text-only.");
-    expect(chatCreate.mock.calls[4]?.[0]).toMatchObject({
-      model: "gemini-2.5-flash-image",
-      contents: [expect.objectContaining({ text: "Analisis video ini" })]
+    expect(createCompletion.mock.calls[4]?.[0]).toMatchObject({
+      model: "gemini/gemini-2.5-flash-image",
+      messages: [
+        {
+          role: "user",
+          content: "Analisis video ini"
+        }
+      ]
     });
   });
 
   it("requests json_object response format for social metadata", async () => {
-    chatCreate.mockReset();
-    chatCreate.mockResolvedValue({
+    createCompletion.mockReset();
+    createCompletion.mockResolvedValue({
       text: '{"caption":"Caption final.","hashtags":["#affiliate"]}'
     });
 
@@ -137,14 +159,17 @@ describe("GeminiContentService", () => {
       caption: "Caption final.",
       hashtags: ["#affiliate"]
     });
-    expect(chatCreate.mock.calls[0]?.[0]?.config).toMatchObject({
-      responseMimeType: "application/json"
+    expect(createCompletion.mock.calls[0]?.[0]).toMatchObject({
+      model: "gemini/gemini-2.5-pro",
+      response_format: {
+        type: "json_object"
+      }
     });
   });
 
   it("adds a helpful message when the requested model is missing", async () => {
-    chatCreate.mockReset();
-    chatCreate.mockRejectedValue({
+    createCompletion.mockReset();
+    createCompletion.mockRejectedValue({
       status: 404,
       message: "404 model not found"
     });

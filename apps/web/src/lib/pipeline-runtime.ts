@@ -400,7 +400,7 @@ export class PipelineRuntime {
         deviceMode: job.runtime.deviceMode
       });
       job.videoDurationSec = analyzed.durationSec;
-      job.runtime.statusMessage = "Mengirim frame ringkas ke Gemini via Cloudflare proxy.";
+      job.runtime.statusMessage = "Mengirim frame ringkas ke Gemini via LiteLLM proxy.";
       await this.persistAndEmit();
 
       const scoredByAi = await analyzeCandidatesWithProxy({

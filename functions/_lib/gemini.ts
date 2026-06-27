@@ -1,4 +1,4 @@
-import { GoogleGenAI, createPartFromBase64, createPartFromText } from "@google/genai";
+import OpenAI from "openai";
 import {
   DEFAULT_GEMINI_TTS_MODEL,
   buildClipSelectionPrompt,
@@ -8,52 +8,92 @@ import {
   extractScriptText,
   extractSocialMetadata,
   normalizeGeminiTtsModel,
-  parseDataUrl
+  toLiteLlmGeminiModel
 } from "@app/core";
 import type {
   AnalyzeClipCandidatesInput,
   GenerateSocialMetadataInput
 } from "@app/core";
 
-function requireApiKey(env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string }): string {
-  const apiKey = env.GEMINI_API_KEY?.trim() || env.GOOGLE_API_KEY?.trim() || "";
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY belum dikonfigurasi di Cloudflare Pages Functions.");
+interface LiteLlmEnv {
+  LITELLM_API_KEY?: string;
+  LITELLM_BASE_URL?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+}
+
+function requireBaseUrl(env: LiteLlmEnv): string {
+  const baseUrl = env.LITELLM_BASE_URL?.trim() || env.OPENAI_BASE_URL?.trim() || "";
+  if (!baseUrl) {
+    throw new Error("LITELLM_BASE_URL belum dikonfigurasi di Cloudflare Pages Functions.");
   }
-  return apiKey;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl.replace(/\/+$/, ""));
+  } catch {
+    throw new Error(
+      "LITELLM_BASE_URL tidak valid. Contoh: http://127.0.0.1:4000 atau https://litellm.example.com"
+    );
+  }
+
+  if (!parsed.pathname || parsed.pathname === "/") {
+    parsed.pathname = "/v1";
+  } else if (!parsed.pathname.endsWith("/v1")) {
+    parsed.pathname = `${parsed.pathname.replace(/\/+$/, "")}/v1`;
+  }
+
+  return parsed.toString().replace(/\/$/, "");
 }
 
-function createClient(env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string }) {
-  return new GoogleGenAI({ apiKey: requireApiKey(env) });
+function resolveApiKey(env: LiteLlmEnv): string {
+  return env.LITELLM_API_KEY?.trim() || env.OPENAI_API_KEY?.trim() || "litellm-no-auth";
 }
 
-export async function generateScript(env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string }, input: {
+function createClient(env: LiteLlmEnv) {
+  return new OpenAI({
+    apiKey: resolveApiKey(env),
+    baseURL: requireBaseUrl(env)
+  });
+}
+
+function buildFrameContent(prompt: string, frames: Array<{ dataUrl: string; timestampSec: number }>) {
+  return [
+    { type: "text", text: prompt },
+    ...frames.flatMap((frame, index) => [
+      {
+        type: "text",
+        text: `Frame ${index + 1} pada ${frame.timestampSec.toFixed(2)} detik.`
+      },
+      {
+        type: "image_url",
+        image_url: {
+          url: frame.dataUrl
+        }
+      }
+    ])
+  ];
+}
+
+export async function generateScript(env: LiteLlmEnv, input: {
   model: string;
   prompt: string;
   frames: Array<{ dataUrl: string; timestampSec: number }>;
 }): Promise<string> {
   const client = createClient(env);
-  const contents = [
-    createPartFromText(input.prompt),
-    ...input.frames.flatMap((frame, index) => {
-      const parsed = parseDataUrl(frame.dataUrl);
-      return [
-        createPartFromText(`Frame ${index + 1} pada ${frame.timestampSec.toFixed(2)} detik.`),
-        createPartFromBase64(parsed.base64, parsed.mimeType)
-      ];
-    })
-  ];
-  const response = await client.models.generateContent({
-    model: input.model,
-    contents
-  });
+  const response = await client.chat.completions.create({
+    model: toLiteLlmGeminiModel(input.model),
+    messages: [
+      {
+        role: "user",
+        content: buildFrameContent(input.prompt, input.frames)
+      }
+    ]
+  } as any);
   return extractScriptText(response);
 }
 
-export async function analyzeCandidates(
-  env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string },
-  input: AnalyzeClipCandidatesInput
-) {
+export async function analyzeCandidates(env: LiteLlmEnv, input: AnalyzeClipCandidatesInput) {
   const client = createClient(env);
   const prompt = buildClipSelectionPrompt({
     title: input.title,
@@ -68,30 +108,41 @@ export async function analyzeCandidates(
   });
 
   const contents = [
-    createPartFromText(prompt),
+    { type: "text", text: prompt },
     ...input.candidates.flatMap((candidate) => [
-      createPartFromText(
-        `Kandidat ${candidate.clipId} pada ${candidate.startSec.toFixed(2)}-${candidate.endSec.toFixed(2)} detik.`
-      ),
+      {
+        type: "text",
+        text: `Kandidat ${candidate.clipId} pada ${candidate.startSec.toFixed(2)}-${candidate.endSec.toFixed(2)} detik.`
+      },
       ...candidate.frames.flatMap((frame, index) => {
-        const parsed = parseDataUrl(frame.dataUrl);
         return [
-          createPartFromText(
-            `Frame ${index + 1} kandidat ${candidate.clipId} pada ${frame.timestampSec.toFixed(2)} detik.`
-          ),
-          createPartFromBase64(parsed.base64, parsed.mimeType)
+          {
+            type: "text",
+            text: `Frame ${index + 1} kandidat ${candidate.clipId} pada ${frame.timestampSec.toFixed(2)} detik.`
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: frame.dataUrl
+            }
+          }
         ];
       })
     ])
   ];
 
-  const response = await client.models.generateContent({
-    model: input.model,
-    contents,
-    config: {
-      responseMimeType: "application/json"
+  const response = await client.chat.completions.create({
+    model: toLiteLlmGeminiModel(input.model),
+    messages: [
+      {
+        role: "user",
+        content: contents
+      }
+    ],
+    response_format: {
+      type: "json_object"
     }
-  });
+  } as any);
   const parsed = extractClipCandidateScores(response);
   const byClipId = new Map(parsed.map((item) => [item.clipId, item]));
   return input.candidates.map((candidate) => ({
@@ -108,57 +159,55 @@ export async function analyzeCandidates(
   }));
 }
 
-export async function generateMetadata(
-  env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string },
-  input: GenerateSocialMetadataInput
-) {
+export async function generateMetadata(env: LiteLlmEnv, input: GenerateSocialMetadataInput) {
   const client = createClient(env);
-  const response = await client.models.generateContent({
-    model: input.model,
-    contents: [
-      createPartFromText(
-        buildReelsMetadataPrompt({
+  const response = await client.chat.completions.create({
+    model: toLiteLlmGeminiModel(input.model),
+    messages: [
+      {
+        role: "user",
+        content: buildReelsMetadataPrompt({
           title: input.title,
           description: input.description,
           platformId: input.platformId,
           scriptText: input.scriptText,
           ctaText: input.ctaText
         })
-      )
+      }
     ],
-    config: {
-      responseMimeType: "application/json"
+    response_format: {
+      type: "json_object"
     }
-  });
+  } as any);
   return extractSocialMetadata(response);
 }
 
-export async function generateTts(
-  env: { GEMINI_API_KEY?: string; GOOGLE_API_KEY?: string },
-  input: {
-    model: string;
-    text: string;
-    voiceName: string;
-    speechRate: number;
-  }
-) {
+export async function generateTts(env: LiteLlmEnv, input: {
+  model: string;
+  text: string;
+  voiceName: string;
+  speechRate: number;
+}) {
   const client = createClient(env);
   const resolvedModel = normalizeGeminiTtsModel(input.model) || DEFAULT_GEMINI_TTS_MODEL;
   const transcript =
     input.speechRate >= 1.1 ? `[very fast] ${input.text}` : input.speechRate <= 0.9 ? `[very slow] ${input.text}` : input.text;
-  const response = await client.models.generateContent({
-    model: resolvedModel,
-    contents: transcript,
-    config: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: input.voiceName
-          }
-        }
+  const response = await client.chat.completions.create({
+    model: toLiteLlmGeminiModel(resolvedModel),
+    messages: [
+      {
+        role: "user",
+        content: transcript
       }
+    ],
+    modalities: ["text", "audio"],
+    audio: {
+      voice: input.voiceName,
+      format: "wav"
+    },
+    extra_body: {
+      allowed_openai_params: ["audio", "modalities"]
     }
-  });
+  } as any);
   return extractAudioFromResponse(response);
 }

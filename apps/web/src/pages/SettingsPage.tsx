@@ -99,7 +99,7 @@ export function SettingsPage() {
             <span>Settings</span>
           </div>
           <p className="eyebrow">YouTube Shorts Core</p>
-          <h2>Kontrol model analisis dan voice over Gemini</h2>
+          <h2>Kontrol model analisis dan voice over Gemini via LiteLLM</h2>
           <p className="page-intro">
             Settings disimpan lokal per browser. Workflow ini dikunci untuk YouTube Shorts affiliate maksimal 30 detik dengan analisis 6 frame dan voice over yang lebih hook-first.
           </p>
@@ -126,7 +126,7 @@ export function SettingsPage() {
                   setSettings({ ...settings, scriptModel: event.target.value })
                 }
               />
-              <span className="small">Default analisis dan scoring: `gemini-2.5-pro`.</span>
+              <span className="small">Isi model alias LiteLLM atau model Gemini langsung, misalnya `gemini-2.5-pro`.</span>
             </label>
 
             <label className="form-field">
@@ -136,7 +136,7 @@ export function SettingsPage() {
                 onChange={(event) => setSettings({ ...settings, ttsModel: event.target.value })}
               />
               <span className="small">
-                Default voice over: `gemini-2.5-flash-preview-tts`.
+                Default voice over via LiteLLM: `gemini-2.5-flash-preview-tts`.
               </span>
             </label>
 

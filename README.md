@@ -2,7 +2,7 @@
 
 Versi terbaru project ini memakai arsitektur browser-local untuk Cloudflare free tier:
 - frontend React di Cloudflare Pages
-- proxy Gemini di Cloudflare Pages Functions
+- proxy LiteLLM di Cloudflare Pages Functions untuk route Gemini
 - analisis video, preview clip, dan render final berjalan di browser user dengan `ffmpeg.wasm`
 - job, settings, dan artifact disimpan lokal di browser lewat `IndexedDB + OPFS`
 
@@ -11,7 +11,7 @@ Legacy backend Fastify masih dipertahankan di repo sebagai fallback lokal, tetap
 ## Workflow Baru
 1. User upload video lokal.
 2. Browser mengekstrak frame dan membuat kandidat clip lokal.
-3. Browser kirim frame ringkas ke `/api/ai/*` Cloudflare Functions untuk scoring, script, caption, dan TTS Gemini.
+3. Browser kirim frame ringkas ke `/api/ai/*` Cloudflare Functions untuk scoring, script, caption, dan TTS Gemini via LiteLLM.
 4. Browser merender preview dan output final lokal.
 5. User download `.mp4`, `.srt`, dan caption `.txt` langsung dari browser.
 
@@ -38,10 +38,16 @@ copy .env.example .env
 ```
 3. Isi `.env` untuk mode legacy/local:
 ```env
-GEMINI_API_KEY=...
+LITELLM_BASE_URL=http://127.0.0.1:4000
+LITELLM_API_KEY=...
 PORT=8787
 WEB_ORIGIN=http://localhost:5173
 ```
+
+Catatan:
+- `LITELLM_BASE_URL` akan dinormalisasi otomatis ke suffix `/v1` bila belum ada.
+- Jika proxy LiteLLM Anda tidak memakai auth, `LITELLM_API_KEY` boleh dikosongkan dan app akan memakai placeholder internal.
+- Alias `OPENAI_BASE_URL` dan `OPENAI_API_KEY` juga didukung bila Anda ingin menyamakan kontrak env dengan client OpenAI-compatible lain.
 
 ## Menjalankan
 
@@ -72,7 +78,8 @@ apps/web/dist
 ```
 4. Tambahkan environment variable Pages Functions:
 ```env
-GEMINI_API_KEY=...
+LITELLM_BASE_URL=https://litellm.example.com
+LITELLM_API_KEY=...
 ```
 5. Pastikan folder `/functions` ikut terdeploy dari root project.
 6. Repo ini sekarang punya `prebuild` self-healing untuk Rollup native binary, jadi kalau Cloudflare/npm melewatkan optional dependency platform-specific, build web akan mencoba memasang paket Rollup yang sesuai platform sebelum `vite build`.

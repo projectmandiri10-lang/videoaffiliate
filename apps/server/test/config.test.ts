@@ -2,23 +2,37 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadEnv } from "../src/config.js";
 
 const ORIGINAL_ENV = {
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-  GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
+  LITELLM_API_KEY: process.env.LITELLM_API_KEY,
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  LITELLM_BASE_URL: process.env.LITELLM_BASE_URL,
+  OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
   PORT: process.env.PORT,
   WEB_ORIGIN: process.env.WEB_ORIGIN
 };
 
 function resetEnv() {
-  if (ORIGINAL_ENV.GEMINI_API_KEY === undefined) {
-    delete process.env.GEMINI_API_KEY;
+  if (ORIGINAL_ENV.LITELLM_API_KEY === undefined) {
+    delete process.env.LITELLM_API_KEY;
   } else {
-    process.env.GEMINI_API_KEY = ORIGINAL_ENV.GEMINI_API_KEY;
+    process.env.LITELLM_API_KEY = ORIGINAL_ENV.LITELLM_API_KEY;
   }
 
-  if (ORIGINAL_ENV.GOOGLE_API_KEY === undefined) {
-    delete process.env.GOOGLE_API_KEY;
+  if (ORIGINAL_ENV.OPENAI_API_KEY === undefined) {
+    delete process.env.OPENAI_API_KEY;
   } else {
-    process.env.GOOGLE_API_KEY = ORIGINAL_ENV.GOOGLE_API_KEY;
+    process.env.OPENAI_API_KEY = ORIGINAL_ENV.OPENAI_API_KEY;
+  }
+
+  if (ORIGINAL_ENV.LITELLM_BASE_URL === undefined) {
+    delete process.env.LITELLM_BASE_URL;
+  } else {
+    process.env.LITELLM_BASE_URL = ORIGINAL_ENV.LITELLM_BASE_URL;
+  }
+
+  if (ORIGINAL_ENV.OPENAI_BASE_URL === undefined) {
+    delete process.env.OPENAI_BASE_URL;
+  } else {
+    process.env.OPENAI_BASE_URL = ORIGINAL_ENV.OPENAI_BASE_URL;
   }
 
   if (ORIGINAL_ENV.PORT === undefined) {
@@ -39,31 +53,49 @@ describe("loadEnv", () => {
     resetEnv();
   });
 
-  it("reads Gemini API key directly", () => {
-    process.env.GEMINI_API_KEY = "gemini-secret";
+  it("reads LiteLLM config directly", () => {
+    process.env.LITELLM_API_KEY = "litellm-secret";
+    process.env.LITELLM_BASE_URL = "http://127.0.0.1:4000";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
     const env = loadEnv();
-    expect(env.geminiApiKey).toBe("gemini-secret");
+    expect(env.litellmApiKey).toBe("litellm-secret");
+    expect(env.litellmBaseUrl).toBe("http://127.0.0.1:4000/v1");
   });
 
-  it("falls back to GOOGLE_API_KEY when Gemini API key is not set", () => {
-    delete process.env.GEMINI_API_KEY;
-    process.env.GOOGLE_API_KEY = "google-secret";
+  it("falls back to OPENAI_* aliases when LiteLLM env is not set", () => {
+    delete process.env.LITELLM_API_KEY;
+    delete process.env.LITELLM_BASE_URL;
+    process.env.OPENAI_API_KEY = "openai-secret";
+    process.env.OPENAI_BASE_URL = "https://litellm.example.com/custom";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
     const env = loadEnv();
-    expect(env.geminiApiKey).toBe("google-secret");
+    expect(env.litellmApiKey).toBe("openai-secret");
+    expect(env.litellmBaseUrl).toBe("https://litellm.example.com/custom/v1");
   });
 
-  it("throws when Gemini env is missing", () => {
-    delete process.env.GEMINI_API_KEY;
-    delete process.env.GOOGLE_API_KEY;
+  it("uses a dummy key when LiteLLM auth is disabled", () => {
+    delete process.env.LITELLM_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    process.env.LITELLM_BASE_URL = "http://127.0.0.1:4000/v1";
     process.env.PORT = "8787";
     process.env.WEB_ORIGIN = "http://localhost:5173";
 
-    expect(() => loadEnv()).toThrow(/GEMINI_API_KEY tidak ditemukan/i);
+    const env = loadEnv();
+    expect(env.litellmApiKey).toBe("litellm-no-auth");
+  });
+
+  it("throws when LiteLLM base URL is missing", () => {
+    delete process.env.LITELLM_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.LITELLM_BASE_URL;
+    delete process.env.OPENAI_BASE_URL;
+    process.env.PORT = "8787";
+    process.env.WEB_ORIGIN = "http://localhost:5173";
+
+    expect(() => loadEnv()).toThrow(/LITELLM_BASE_URL tidak ditemukan/i);
   });
 });
